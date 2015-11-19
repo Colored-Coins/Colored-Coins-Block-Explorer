@@ -1,0 +1,47 @@
+{
+  "/api/parsetx" : {
+    "function_name": "api.parse_tx",
+    "params": [
+      "txid"
+    ]
+  },
+  "/api/getaddressesinfowithtransactions" : {
+    "function_name": "api.get_addresses_info_with_transactions",
+    "params": [
+      "addresses"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/getaddressesinfo" : {
+    "function_name": "api.get_addresses_info",
+    "params": [
+      "addresses"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/getaddressesutxos" : {
+    "function_name": "api.get_addresses_utxos",
+    "params": [
+      "addresses"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/getutxos" : {
+    "function_name": "api.get_utxos",
+    "params": [
+      "utxos"
+    ]
+  },
+  "/api/transmit" : {
+    "function_name": "api.transmit",
+    "params": [
+      "txHex"
+    ]
+  }
+}

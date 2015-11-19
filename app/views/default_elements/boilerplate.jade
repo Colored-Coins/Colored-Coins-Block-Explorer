@@ -1,0 +1,49 @@
+doctype html
+html.no-js(lang='')
+  head
+    meta(charset='UTF-8',http-equiv='X-UA-Compatible', content='IE=edge')
+    meta()
+    meta(name='description', content='')
+    meta(name='viewport', content='width=device-width, initial-scale=1')
+
+    block header_assets
+      link(rel='apple-touch-icon', href='apple-touch-icon.png')
+      link(rel='stylesheet', href='/../css/normalize.css')
+      link(rel='stylesheet', href='/../css/main.css')
+      script(src='/../js/vendor/modernizr-2.8.3.min.js')
+      script(src='//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js')
+      script.
+        window.jQuery || document.write('<script src="/../js/vendor/jquery-1.11.2.min.js"><\\/script>')
+      script(src='/../js/plugins.js')
+      script(src='/../js/main.js')
+
+    block title
+      title Default title
+
+  body
+    //if lt IE 8
+      p.browserupgrade
+        | You are using an
+        strong outdated
+        |  browser. Please
+        a(href='http://browsehappy.com/') upgrade your browser
+        |  to improve your experience.
+
+    .container.reg
+      // Add your site or application content here
+      block navbar
+      block main_view
+      // End of custom site
+
+
+    block fotter_assets
+
+    // Google Analytics: change UA-XXXXX-X to be your site's ID.
+    script.
+      (function(b,o,i,l,e,r){b.GoogleAnalyticsObject=l;b[l]||(b[l]=
+      function(){(b[l].q=b[l].q||[]).push(arguments)});b[l].l=+new Date;
+      e=o.createElement(i);r=o.getElementsByTagName(i)[0];
+      e.src='//www.google-analytics.com/analytics.js';
+      r.parentNode.insertBefore(e,r)}(window,document,'script','ga'));
+      ga('create','UA-XXXXX-X','auto');ga('send','pageview');
+

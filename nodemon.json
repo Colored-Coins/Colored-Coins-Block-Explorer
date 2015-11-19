@@ -1,0 +1,9 @@
+{
+  "restartable": "rs",
+  "verbose": false,
+  "execMap": {
+    "js": "node"
+  },
+  "ext": "json conf js",
+  "ignore":["test/*"]
+}

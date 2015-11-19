@@ -1,0 +1,18 @@
+node_modules
+properties.conf
+extra_stuff
+log
+npm-debug.log
+coverage/
+install.bat
+license.json
+.DS_store
+settings/properties.conf
+settings/properties2.conf
+settings/properties - Copy.conf
+settings/properties_testnet.conf
+settings/properties_mainnet.conf
+settings/properties_local.conf
+config/properties_local.conf
+config/properties_mainnet.conf
+config/properties_dev.conf

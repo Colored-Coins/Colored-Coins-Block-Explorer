@@ -1,0 +1,141 @@
+{
+  "/api/getblock" : {
+    "function_name": "api.get_block",
+    "params": [
+      "height_or_hash"
+    ]
+  },
+  "/api/getblockwithtransactions" : {
+    "function_name": "api.get_block_with_transactions",
+    "params": [
+      "height_or_hash"
+    ],
+    "optional": [
+      "colored"
+    ]
+  },
+  "/api/getmempooltxids" : {
+    "function_name": "api.get_mempool_txids",
+    "params": [ ],
+    "optional": [
+      "colored"
+    ]
+  },
+  "/api/gettransaction" : {
+    "function_name": "api.get_transaction",
+    "params": [
+      "txid"
+    ]
+  },
+  "/api/getaddressinfowithtransactions" : {
+    "function_name": "api.get_address_info_with_transactions",
+    "params": [
+      "address"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/getaddressinfo" : {
+    "function_name": "api.get_address_info",
+    "params": [
+      "address"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/getassetinfowithtransactions" : {
+    "function_name": "api.get_asset_info_with_transactions",
+    "params": [
+      "assetId"
+    ]
+  },
+  "/api/getassetinfo" : {
+    "function_name": "api.get_asset_info",
+    "params": [
+      "assetId"
+    ],
+    "optional": [
+      "utxo"
+    ]
+  },
+  "/api/getmainstats" : {
+    "function_name": "api.get_main_stats",
+    "params": []
+  },
+  "/api/getpopularassets" : {
+    "function_name": "api.get_popular_assets",
+    "params": [],
+    "optional": [
+      "sortBy",
+      "limit"
+    ]
+  },
+  "/api/gettransactionsbyintervals" : {
+    "function_name": "api.get_transactions_by_intervals",
+    "params": [],
+    "optional": [
+      "start",
+      "end",
+      "interval",
+      "assetId"
+    ]
+  },
+  "/api/getaddressutxos" : {
+    "function_name": "api.get_address_utxos",
+    "params": [
+      "address"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/getcctransactions" : {
+    "function_name": "api.get_cc_transactions",
+    "params": [],
+    "optional": [
+      "limit"
+    ]
+  },
+  "/api/getassetholders" : {
+    "function_name": "api.get_asset_holders",
+    "params": [
+      "assetId"
+    ],
+    "optional": [
+      "confirmations"
+    ]
+  },
+  "/api/search" : {
+    "function_name": "api.search",
+    "params": [
+      "arg"
+    ]
+  },
+  "/api/getblocks" : {
+    "function_name": "api.get_blocks",
+    "params": [],
+    "optional": [
+      "start",
+      "end"
+    ]
+  },
+  "/api/getutxo" : {
+    "function_name": "api.get_utxo",
+    "params": [
+      "txid",
+      "index"
+    ]
+  },
+  "/api/getinfo" : {
+    "function_name": "api.get_info",
+    "params": [ ]
+  },
+  "/api/test" : {
+    "function_name": "api.test",
+    "params": [
+      "address"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "cc-block-explorer",
+  "version": "1.0.0",
+  "description": "Colored Coins Block Explorer",
+  "main": "app.js",
+  "dependencies": {
+    "async": "~0.9.0",
+    "bitcoin-async": "^1.0.0",
+    "bitcoinjs-lib": "^1.5.6",
+    "bs58": "^3.0.0",
+    "casimircore": "^0.2.0",
+    "cc-block-parser": "^0.2.21",
+    "coinstring": "^2.3.0",
+    "commander": "^2.9.0",
+    "ecdsa": "^0.6.0",
+    "ecurve": "^1.0.2",
+    "google-libphonenumber": "^1.0.4",
+    "jade": "^1.9.1",
+    "jsonfile": "^2.0.0",
+    "lodash": "^3.10.0",
+    "moment": "~2.8.4",
+    "mongoose": "4.1.12",
+    "validator": "^3.27.0"
+  },
+  "bin": {
+    "cc-explorer": "./bin/cc-block-explorer",
+    "cc-block-explorer": "./bin/cc-block-explorer"
+  },
+  "devDependencies": {
+    "chai": "^2.3.0",
+    "istanbul": "^0.3.19",
+    "loadtest": "^1.2.14",
+    "mocha": "^2.3.0",
+    "supertest": "^1.1.0",
+    "tape": "^4.0.0",
+    "xunit-file": "0.0.7"
+  },
+  "scripts": {
+    "casimir": "npm install && nodemon",
+    "test": "NODE_ENV=QA istanbul cover _mocha -- -R tap > test-reports.tap && istanbul report html",
+    "ci-mocha-test": "NODE_ENV=QA mocha -R xunit > test-reports.xml",
+    "start": "sudo node app.js",
+    "ci-coverage-test": "NODE_ENV=QA istanbul cover _mocha -- -R tap > test-reports.tap && istanbul report cobertura",
+    "ci-full": "NODE_ENV=QA LOG_XUNIT=true XUNIT_FILE=test-reports.xml istanbul cover _mocha -- -R xunit-file",
+    "test-windows": ".\\node_modules\\.bin\\istanbul cover .\\node_modules\\mocha\\bin\\_mocha\\ -- -R tap > .\\test-reports.tap && istanbul report html"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Colored-Coins/Colored-Coins-Block-Explorer.git"
+  },
+  "keywords": [
+    "explorer",
+    "coloredCoins",
+    "colored coins",
+    "bitcoin",
+    "blockchain",
+    "cryptocurrency"
+  ],
+  "contributors": [
+    {
+      "name": "Eliran Zach",
+      "email": "thehobbit85@gmail.com"
+    },
+    {
+      "name": "bejavu",
+      "email": "tal@colu.co"
+    }
+  ],
+  "license": "MIT"
+}
