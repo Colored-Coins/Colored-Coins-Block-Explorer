@@ -19,9 +19,24 @@ $ npm i -g cc-block-explorer
 
 ### Run
 
-To run your colored coins block explorer you need to provide a propeties file:
+You can run the Block Explorer with the following options:
+
 ```sh
-$ cc-explorer --prop FILENAME.EXTANTION
+  cc-explorer [options]
+
+  Options:
+
+    -h, --help                                         output usage information
+    -V, --version                                      output the version number
+    -p, --port <port>                                  Port to listen on [$PORT or 8080/8081]
+    -s, --ssl <key-file-path> <certificate-file-path>  Enable ssl
+    -c, --conf <config-file-path>                      Load a custom configuration file
+```
+
+Or just run it with the defualts using:
+
+```sh
+$ cc-explorer
 ```
 
 ### Properties
