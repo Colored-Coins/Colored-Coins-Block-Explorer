@@ -688,6 +688,14 @@ var find_utxo = function (txid, index, callback) {
   Utxos.findOne({txid: txid, index: index}, callback)
 }
 
+var find_utxos = function (utxos, callback) {
+  if (!utxos || !utxos.length) return callback(null, [])
+  var or = utxos.map(function (utxo) {
+    return {txid: utxo.txid, index: utxo.index}
+  })
+  Utxos.find({$or: or}, callback)
+}
+
 var is_asset = function (assetId, callback) {
   AssetsTransactions.findOne({assetId: assetId}, function (err, asset_transaction) {
     if (err) return callback(err)
@@ -801,21 +809,15 @@ var get_utxo = function (req, res, next) {
   var params = req.data
   var txid = params.txid
   var index = params.index
+  params.utxos = [{txid: txid, index: index}]
 
-  find_utxo(txid, index, function (err, utxo) {
-    if (err) return next(err)
-    utxo = utxo || null
-    res.send(utxo)
-  })
+  get_utxos(req, res, next)
 }
 var get_utxos = function (req, res, next) {
   var params = req.data
   var utxos = params.utxos
 
-  async.map(utxos, function (utxo, cb) {
-    find_utxo(utxo.txid, utxo.index, cb)
-  },
-  function (err, ans) {
+  find_utxos(utxos, function (err, ans) {
     if (err) return next(err)
     res.send(ans)
   })
