@@ -810,9 +810,10 @@ var get_utxo = function (req, res, next) {
   var txid = params.txid
   var index = params.index
   
-  find_utxo(txid, index, function (err, ans) {
+  find_utxo(txid, index, function (err, utxo) {
     if (err) return next(err)
-    res.send(ans)
+    utxo = utxo || null
+    res.send(utxo)
   })
 }
 var get_utxos = function (req, res, next) {
