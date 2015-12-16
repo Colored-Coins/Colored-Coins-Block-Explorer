@@ -809,9 +809,11 @@ var get_utxo = function (req, res, next) {
   var params = req.data
   var txid = params.txid
   var index = params.index
-  params.utxos = [{txid: txid, index: index}]
-
-  get_utxos(req, res, next)
+  
+  find_utxo(txid, index, function (err, ans) {
+    if (err) return next(err)
+    res.send(ans)
+  })
 }
 var get_utxos = function (req, res, next) {
   var params = req.data
