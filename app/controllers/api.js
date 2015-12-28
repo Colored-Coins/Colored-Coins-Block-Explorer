@@ -1104,8 +1104,9 @@ var is_active = function (req, res, next) {
   var addresses = params.addresses
   if (!addresses || !Array.isArray(addresses)) return next('addresses should be array')
   var match = {
-  address: {
-    $in: addresses
+    address: {
+      $in: addresses
+    }
   }
   var group = {
     _id: "$address"
@@ -1114,7 +1115,7 @@ var is_active = function (req, res, next) {
     address: "$_id",
     _id: 0
   }
-}
+
   AddressesTransactions.aggregate( 
     {$match   : match}, 
     {$group   : group},
