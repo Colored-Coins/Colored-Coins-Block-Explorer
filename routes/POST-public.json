@@ -38,6 +38,12 @@
       "utxos"
     ]
   },
+  "/api/isactive" : {
+    "function_name": "api.is_active",
+    "params": [
+      "addresses"
+    ]
+  },
   "/api/transmit" : {
     "function_name": "api.transmit",
     "params": [

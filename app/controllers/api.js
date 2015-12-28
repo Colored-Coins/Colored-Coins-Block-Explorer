@@ -233,6 +233,7 @@ var find_addresses_utxos = function (addresses, confirmations, callback) {
   async.each(addresses, function (address, cb) {
     find_address_utxos(address, confirmations, function (err, utxos) {
       if (err) return cb(err)
+      // ans.push({address: address, utxos: utxos}) //TODO: change to this in V2
       ans.push(utxos)
       cb()
     })
@@ -258,8 +259,7 @@ var find_address_utxos = function (address, confirmations, callback) {
       address_utxos.forEach(function (address_utxo) {
         var cond = {
           txid: address_utxo.utxo.split(':')[0],
-          index: address_utxo.utxo.split(':')[1],
-          used: false
+          index: address_utxo.utxo.split(':')[1]
         }
         if (confirmations) {
           cond.blockheight = {
@@ -269,7 +269,7 @@ var find_address_utxos = function (address, confirmations, callback) {
         }
         conditions.push(cond)
       })
-      Utxos.find({$or: conditions}).exec(cb)
+      Utxos.find({used: false, $or: conditions}).exec(cb)
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
@@ -1099,6 +1099,44 @@ var get_block_with_transactions = function (req, res, next) {
   })
 }
 
+var is_active = function (req, res, next) {
+  var params = req.data
+  var addresses = params.addresses
+  if (!addresses || !Array.isArray(addresses)) return next('addresses should be array')
+  var match = {
+  address: {
+    $in: addresses
+  }
+  var group = {
+    _id: "$address"
+  }
+  var project = {
+    address: "$_id",
+    _id: 0
+  }
+}
+  AddressesTransactions.aggregate( 
+    {$match   : match}, 
+    {$group   : group},
+    {$project : project}
+  ).exec(function (err, active_addresses) {
+    if (err) return next(err)
+    var ans = addresses.map(function (address) {
+      var found = false
+      active_addresses.forEach(function (active_address) {
+        if (!found && active_address.address === address) {
+          found = true
+        }
+      })
+      return {
+        address: address,
+        active: found
+      }
+    })
+    res.send(ans)
+  })
+}
+
 var transmit = function (req, res, next) {
   var params = req.data
   var txHex = params.txHex
@@ -1133,5 +1171,6 @@ module.exports = {
   get_utxos: get_utxos,
   get_mempool_txids: get_mempool_txids,
   get_info: get_info,
+  is_active: is_active,
   transmit: transmit
 }
