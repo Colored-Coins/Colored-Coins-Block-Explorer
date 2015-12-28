@@ -259,7 +259,8 @@ var find_address_utxos = function (address, confirmations, callback) {
       address_utxos.forEach(function (address_utxo) {
         var cond = {
           txid: address_utxo.utxo.split(':')[0],
-          index: address_utxo.utxo.split(':')[1]
+          index: address_utxo.utxo.split(':')[1],
+          used: false
         }
         if (confirmations) {
           cond.blockheight = {
@@ -269,7 +270,7 @@ var find_address_utxos = function (address, confirmations, callback) {
         }
         conditions.push(cond)
       })
-      Utxos.find({used: false, $or: conditions}).exec(cb)
+      Utxos.find({$or: conditions}).exec(cb)
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
