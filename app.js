@@ -57,14 +57,20 @@ if (cluster.isMaster) {
   var scanner_worker = fork(properties.roles.SCANNER)
   var fixer_worker = fork(properties.roles.FIXER)
   var cc_parser = fork(properties.roles.CC_PARSER)
-  var worker = fork(properties.roles.API)
-  api_workers_ids.push(worker.id)
   // Register workers to the message bus
   listen(scanner_worker)
   listen(fixer_worker)
   listen(cc_parser)
+  var worker = fork(properties.roles.API)
+  api_workers_ids.push(worker.id)
   listen(worker)
 
+  for (var i = 0; i < cluster_size - 1; i++) { // TODO change first i = 4
+    var worker = fork(properties.roles.API)
+    api_workers_ids.push(worker.id)
+    listen(worker)
+  }
+  
   cluster.on('exit', function (worker, code, signal) {
     logger.error('Worker number ' + worker.id + ' has died')
     switch (worker.id) {
@@ -83,7 +89,7 @@ if (cluster.isMaster) {
       default:
         var new_worker = fork(properties.roles.API)
         var index = api_workers_ids.indexOf(worker.id)
-        if (index !== -1) api_workers_ids.splice(index, 1)
+        if (~index) api_workers_ids.splice(index, 1)
         api_workers_ids.push(new_worker.id)
         listen(new_worker)
         break
