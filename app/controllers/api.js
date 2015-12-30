@@ -831,10 +831,10 @@ var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
   var callback
-  logger.info('parse_tx: start', txid)
+  console.time('parse_tx: ' + txid)
   callback = function (data) {
     if (data.priority_parsed === txid) {
-      logger.info('parse_tx: end', txid)
+      console.timeEnd('parse_tx: ' + txid)
       process.removeListener('message', callback)
       if (data.err) return next(data.err)
       res.send({txid: txid})
