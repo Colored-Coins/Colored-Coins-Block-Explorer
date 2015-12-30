@@ -12,7 +12,7 @@ properties.roles = {
   API: 'API'
 }
 
-var cluster_size = properties.server.cluster
+var cluster_size = properties.server.cluster || 0
 var numCPUs = os.cpus().length
 if (cluster_size) cluster_size = parseInt(cluster_size, 10)
 if (!cluster_size) cluster_size = numCPUs
@@ -64,8 +64,8 @@ if (cluster.isMaster) {
   var worker = fork(properties.roles.API)
   api_workers_ids.push(worker.id)
   listen(worker)
-
-  for (var i = 0; i < cluster_size - 1; i++) { // TODO change first i = 4
+  console.log('cluster_size', cluster_size)
+  for (var i = 4; i < cluster_size - 1; i++) {
     var worker = fork(properties.roles.API)
     api_workers_ids.push(worker.id)
     listen(worker)
