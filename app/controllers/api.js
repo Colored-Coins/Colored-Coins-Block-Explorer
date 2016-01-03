@@ -831,6 +831,7 @@ var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
   var callback
+  console.log('start parse_tx '+txid)
   console.time('parse_tx: ' + txid)
   callback = function (data) {
     if (data.priority_parsed === txid) {

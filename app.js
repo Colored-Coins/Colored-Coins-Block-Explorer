@@ -37,7 +37,9 @@ var listen = function (worker) {
         cc_parser.send(data)
         break
       default:
-        // logger.info('listen: to API', data)
+        if (data && data.priority_parsed) {
+          console.log('priority_parsed inter-process answer '+ data.priority_parsed)
+        }
         api_workers_ids.forEach(function (worker_id) {
           workers[worker_id].send(data)
         })
