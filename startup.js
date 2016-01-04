@@ -45,7 +45,15 @@ process.on('message', function (msg) {
   }
   if (scanner && process.env.ROLE === properties.roles.SCANNER) {
     if (msg.parse_priority) {
-      scanner.priority_parse(msg.parse_priority, function () { })
+      console.log('priority_parse scanner got request '+ msg.parse_priority)
+      scanner.priority_parse(msg.parse_priority, function (err) {
+        console.log('priority_parse scanner sending answer '+ msg.parse_priority)
+        process.send({
+          to: properties.roles.API,
+          priority_parsed: msg.parse_priority,
+          err: err
+        })
+      })
     }
   }
 })

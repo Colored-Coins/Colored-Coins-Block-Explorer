@@ -28,6 +28,9 @@ var listen = function (worker) {
   worker.on('message', function (data) {
     switch (data.to) {
       case properties.roles.SCANNER:
+        if (data && data.parse_priority) {
+          console.log('priority_parse inter-process request '+ data.parse_priority)
+        }
         scanner_worker.send(data)
         break
       case properties.roles.FIXER:
@@ -38,7 +41,7 @@ var listen = function (worker) {
         break
       default:
         if (data && data.priority_parsed) {
-          console.log('priority_parsed inter-process answer '+ data.priority_parsed)
+          console.log('priority_parse inter-process answer '+ data.priority_parsed)
         }
         api_workers_ids.forEach(function (worker_id) {
           workers[worker_id].send(data)
