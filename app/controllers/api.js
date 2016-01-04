@@ -831,11 +831,10 @@ var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
   var callback
-  console.log('start parse_tx '+txid)
-  console.time('parse_tx: ' + txid)
+  console.time('parse_tx: full_parse ' + txid)
   callback = function (data) {
     if (data.priority_parsed === txid) {
-      console.timeEnd('parse_tx: ' + txid)
+      console.timeEnd('parse_tx: full_parse ' + txid)
       process.removeListener('message', callback)
       if (data.err) return next(data.err)
       res.send({txid: txid})
@@ -844,7 +843,9 @@ var parse_tx = function (req, res, next) {
 
   process.on('message', callback)
 
+  console.time('parse_tx: process.send ' + txid)
   process.send({to: properties.roles.SCANNER, parse_priority: txid})
+  console.timeEnd('parse_tx: process.send ' + txid)
 }
 
 var get_popular_assets = function (req, res, next) {
