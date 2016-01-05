@@ -843,9 +843,9 @@ var parse_tx = function (req, res, next) {
 
   process.on('message', callback)
 
-  console.time('parse_tx: process.send ' + txid)
+  console.time('priority_parse: api_to_parent ' + txid)
   process.send({to: properties.roles.SCANNER, parse_priority: txid})
-  console.timeEnd('parse_tx: process.send ' + txid)
+  console.timeEnd('priority_parse: api_to_parent ' + txid)
 }
 
 var get_popular_assets = function (req, res, next) {
