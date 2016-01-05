@@ -47,13 +47,13 @@ process.on('message', function (msg) {
     if (msg.parse_priority) {
       console.log('priority_parse scanner got request '+ msg.parse_priority)
       scanner.priority_parse(msg.parse_priority, function (err) {
-        console.time('priority_parse scanner_to_perant '+ msg.parse_priority)
+        console.time('priority_parse scanner_to_parent '+ msg.parse_priority)
         process.send({
           to: properties.roles.API,
           priority_parsed: msg.parse_priority,
           err: err
         })
-        console.timeEnd('priority_parse scanner_to_perant '+ msg.parse_priority)
+        console.timeEnd('priority_parse scanner_to_parent '+ msg.parse_priority)
       })
     }
   }
