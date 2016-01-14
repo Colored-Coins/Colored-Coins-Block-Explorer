@@ -45,6 +45,7 @@ var add_used_txid = function (tx, callback) {
   async.each(tx.vout, function (vout, cb) {
     find_utxo(tx.txid, vout.n, function (err, utxo) {
       if (err) return cb(err)
+      if (!utxo) return cb('cant find transaction:', tx.txid, 'output:', vout.n)
       vout.used = utxo.used
       vout.blockheight = utxo.blockheight
       vout.usedBlockheight = utxo.usedBlockheight
