@@ -17,6 +17,10 @@ var AssetsAddresses = db.get_model('AssetsAddresses')
 
 var MAX_BLOCKS_ALLOWED = 50
 
+var no_id = {
+  _id: 0
+}
+
 properties.last_block = properties.last_block || 0
 var find_block = function (height_or_hash, callback) {
   var conditions
@@ -36,7 +40,7 @@ var find_block = function (height_or_hash, callback) {
     }
   }
   conditions.ccparsed = true
-  return Blocks.findOne(conditions).exec(callback)
+  return Blocks.findOne(conditions, no_id).lean().exec(callback)
 }
 
 var add_used_txid = function (tx, callback) {
@@ -67,7 +71,7 @@ var find_transaction = function (txid, callback) {
   } else {
     return callback()
   }
-  return RawTransactions.findOne(conditions).exec(function (err, tx) {
+  return RawTransactions.findOne(conditions, no_id).lean().exec(function (err, tx) {
     if (err) return callback(err)
     add_used_txid(tx, callback)
   })
@@ -81,7 +85,7 @@ var find_transactions = function (txids, colored, callback) {
   if (colored) {
     conditions.colored = true
   }
-  return RawTransactions.find(conditions).sort('time').exec(function (err, txs) {
+  return RawTransactions.find(conditions, no_id).sort('time').lean().exec(function (err, txs) {
     if (err) return callback(err)
     async.map(txs, function (tx, cb) {
       add_used_txid(tx, cb)
@@ -92,9 +96,9 @@ var find_transactions = function (txids, colored, callback) {
 
 var find_addresses_info = function (addresses, confirmations, callback) {
   var ans = []
-  logger.debug('addresses', JSON.stringify(addresses))
+  // logger.debug('addresses', JSON.stringify(addresses))
   async.each(addresses, function (address, cb) {
-    logger.debug('address', address)
+    // logger.debug('address', address)
     find_address_info(address, confirmations, function (err, address_info) {
       if (err) return cb(err)
       ans.push(address_info)
@@ -120,7 +124,7 @@ var find_address_info = function (address, confirmations, callback) {
 
   async.waterfall([
     function (cb) {
-      AddressesTransactions.find({address: address}).exec(cb)
+      AddressesTransactions.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_txids, cb) {
       var txids = []
@@ -136,7 +140,7 @@ var find_address_info = function (address, confirmations, callback) {
           $gte: 0
         }
       }
-      RawTransactions.find(conditions).exec(cb)
+      RawTransactions.find(conditions, no_id).lean().exec(cb)
     },
     function (txs, cb) {
       txs.forEach(function (tx) {
@@ -170,7 +174,7 @@ var find_address_info = function (address, confirmations, callback) {
       return cb()
     },
     function (cb) {
-      AddressesUtxos.find({address: address}).exec(cb)
+      AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_utxos, cb) {
       if (!address_utxos.length) return cb(null, [])
@@ -189,7 +193,7 @@ var find_address_info = function (address, confirmations, callback) {
         }
         conditions.push(cond)
       })
-      Utxos.find({$or: conditions}).exec(cb)
+      Utxos.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
@@ -252,7 +256,7 @@ var find_address_utxos = function (address, confirmations, callback) {
 
   async.waterfall([
      function (cb) {
-      AddressesUtxos.find({address: address}).exec(cb)
+      AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_utxos, cb) {
       if (!address_utxos.length) return cb(null, [])
@@ -271,7 +275,7 @@ var find_address_utxos = function (address, confirmations, callback) {
         }
         conditions.push(cond)
       })
-      Utxos.find({$or: conditions}).exec(cb)
+      Utxos.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
@@ -303,7 +307,7 @@ var find_asset_transactions = function (assetId, confirmations, type, callback) 
       if (type) {
         conditions.type = type
       }
-      AssetsTransactions.find(conditions).exec(cb)
+      AssetsTransactions.find(conditions, no_id).lean().exec(cb)
     },
     function (assets_transactions, cb) {
       if (!assets_transactions.length) return cb(null, [])
@@ -320,7 +324,7 @@ var find_asset_transactions = function (assetId, confirmations, type, callback) 
         }
         conditions.push(cond)
       })
-      RawTransactions.find({$or: conditions}).exec(cb)
+      RawTransactions.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (txs, cb) {
       txs.forEach(function (tx) {
@@ -352,7 +356,7 @@ var find_asset_utxos = function (assetId, confirmations, callback) {
 
   async.waterfall([
      function (cb) {
-      AssetsUtxos.find({assetId: assetId}).exec(cb)
+      AssetsUtxos.find({assetId: assetId}, no_id).lean().exec(cb)
     },
     function (assets_utxos, cb) {
       if (!assets_utxos.length) return cb(null, [])
@@ -371,7 +375,7 @@ var find_asset_utxos = function (assetId, confirmations, callback) {
         }
         conditions.push(cond)
       })
-      Utxos.find({$or: conditions}).exec(cb)
+      Utxos.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
@@ -416,7 +420,7 @@ var find_blocks = function (start, end, callback) {
       ccparsed: true
     }
   }
-  Blocks.find(conditions).sort('-height').limit(limit).exec(callback)
+  Blocks.find(conditions, no_id).lean().sort('-height').limit(limit).exec(callback)
 }
 
 var find_asset_holders = function (assetId, confirmations, callback) {
@@ -523,7 +527,7 @@ var find_first_issuance = function (assetId, utxo, callback) {
     txid: utxo.split(':')[0],
     index: utxo.split(':')[1]
   }
-  Utxos.findOne(conditions).exec(function (err, utxo_obj) {
+  Utxos.findOne(conditions, no_id).lean().exec(function (err, utxo_obj) {
     if (err) return callback(err)
     if (!utxo_obj) return callback()
     var found = false
@@ -633,12 +637,12 @@ var find_cc_transactions = function (limit, callback) {
     ccparsed: true,
     blockheight: -1
   }
-  RawTransactions.find(conditions).sort('-_id').limit(limit).exec(function (err, txs) {
+  RawTransactions.find(conditions, no_id).lean().sort('-_id').limit(limit).exec(function (err, txs) {
     if (err) return callback(err)
     limit = limit - txs.length
     if (!limit) return callback(null, txs)
     delete conditions.blockheight
-    RawTransactions.find(conditions).sort('-blockheight').limit(limit).exec(function (err, conf_txs) {
+    RawTransactions.find(conditions, no_id).lean().sort('-blockheight').limit(limit).exec(function (err, conf_txs) {
       if (err) callback(err)
       txs = txs.concat(conf_txs)
       callback(null, txs)
@@ -687,7 +691,7 @@ var find_popular_assets = function (sort_by, limit, callback) {
 }
 
 var find_utxo = function (txid, index, callback) {
-  Utxos.findOne({txid: txid, index: index}, callback)
+  Utxos.findOne({txid: txid, index: index}, no_id).lean().exec(callback)
 }
 
 var find_utxos = function (utxos, callback) {
@@ -695,7 +699,7 @@ var find_utxos = function (utxos, callback) {
   var or = utxos.map(function (utxo) {
     return {txid: utxo.txid, index: utxo.index}
   })
-  Utxos.find({$or: or}, callback)
+  Utxos.find({$or: or}, no_id).lean().exec(callback)
 }
 
 var is_asset = function (assetId, callback) {
@@ -712,8 +716,8 @@ var find_mempool_txids = function (colored, callback) {
   if (colored) {
     conditions.colored = true
   }
-  var projection = {txid: 1}
-  RawTransactions.find(conditions, projection).exec(function (err, txs) {
+  var projection = {txid: 1, _id: 0}
+  RawTransactions.find(conditions, projection).lean().exec(function (err, txs) {
     if (err) return callback(err)
     return callback(null, txs.map(function (tx) {
       return tx.txid
@@ -741,7 +745,8 @@ var find_last_parsed_block = function (callback) {
   var conditions = {
     txinserted: true
   }
-  Blocks.findOne(conditions)
+  Blocks.findOne(conditions, no_id)
+  .lean()
   .sort('-height')
   .exec(function (err, block_data) {
     if (err) return callback(err)
@@ -755,7 +760,8 @@ var find_last_fixed_block = function (callback) {
     txinserted: true,
     txsparsed: true
   }
-  Blocks.findOne(conditions)
+  Blocks.findOne(conditions, no_id)
+  .lean()
   .sort('-height')
   .exec(function (err, block_data) {
     if (err) return callback(err)
@@ -770,7 +776,8 @@ var find_last_cc_parsed_block = function (callback) {
     txsparsed: true,
     ccparsed: true
   }
-  Blocks.findOne(conditions)
+  Blocks.findOne(conditions, no_id)
+  .lean()
   .sort('-height')
   .exec(function (err, block_data) {
     if (err) return callback(err)
