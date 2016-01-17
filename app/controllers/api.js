@@ -45,7 +45,6 @@ var find_block = function (height_or_hash, callback) {
 
 var add_used_txid = function (tx, callback) {
   if (!tx || !tx.vout) return callback(null, tx)
-  tx = tx.toObject()
   async.each(tx.vout, function (vout, cb) {
     find_utxo(tx.txid, vout.n, function (err, utxo) {
       if (err) return cb(err)
