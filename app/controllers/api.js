@@ -47,7 +47,7 @@ var add_used_txid = function (tx, callback) {
   tx.ccdata = tx.ccdata || []
   if (!tx || !tx.vout) return callback(null, tx)
   async.each(tx.vout, function (vout, cb) {
-    tx.vout.assets = tx.vout.assets
+    vout.assets = vout.assets || []
     find_utxo(tx.txid, vout.n, function (err, utxo) {
       if (err) return cb(err)
       if (!utxo) return cb('cant find transaction: ' + tx.txid + ' output: ' + vout.n)
