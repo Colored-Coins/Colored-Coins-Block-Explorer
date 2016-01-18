@@ -44,8 +44,8 @@ var find_block = function (height_or_hash, callback) {
 }
 
 var add_used_txid = function (tx, callback) {
-  tx.ccdata = tx.ccdata || []
   if (!tx || !tx.vout) return callback(null, tx)
+  tx.ccdata = tx.ccdata || []
   async.each(tx.vout, function (vout, cb) {
     vout.assets = vout.assets || []
     find_utxo(tx.txid, vout.n, function (err, utxo) {
