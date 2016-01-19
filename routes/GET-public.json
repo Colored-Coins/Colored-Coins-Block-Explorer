@@ -95,7 +95,8 @@
     "function_name": "api.get_cc_transactions",
     "params": [],
     "optional": [
-      "limit"
+      "limit",
+      "skip"
     ]
   },
   "/api/getassetholders" : {

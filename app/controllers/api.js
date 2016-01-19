@@ -199,19 +199,18 @@ var find_address_info = function (address, confirmations, callback) {
     function (unspents, cb) {
       unspents.forEach(function (tx) {
         ans.balance += tx.value
-        if (tx.assets && tx.assets.length) {
-          tx.assets.forEach(function (asset) {
-            var assetId = asset.assetId
-            assets[assetId] = assets[assetId] || {
-              assetId: assetId,
-              balance: 0,
-              received: 0,
-              divisibility: asset.divisibility,
-              lockStatus: asset.lockStatus
-            }
-            assets[assetId].balance += asset.amount
-          })
-        }
+        tx.assets = tx.assets || []
+        tx.assets.forEach(function (asset) {
+          var assetId = asset.assetId
+          assets[assetId] = assets[assetId] || {
+            assetId: assetId,
+            balance: 0,
+            received: 0,
+            divisibility: asset.divisibility,
+            lockStatus: asset.lockStatus
+          }
+          assets[assetId].balance += asset.amount
+        })
         if (utxos.indexOf(tx) === -1) {
           utxos.push(tx)
         }
@@ -280,6 +279,7 @@ var find_address_utxos = function (address, confirmations, callback) {
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
+        tx.assets = tx.assets || []
         if (utxos.indexOf(tx) === -1) {
           utxos.push(tx)
         }
@@ -380,6 +380,7 @@ var find_asset_utxos = function (assetId, confirmations, callback) {
     },
     function (unspents, cb) {
       unspents.forEach(function (tx) {
+        tx.assets = tx.assets || []
         if (utxos.indexOf(tx) === -1) {
           utxos.push(tx)
         }
@@ -532,6 +533,7 @@ var find_first_issuance = function (assetId, utxo, callback) {
     if (err) return callback(err)
     if (!utxo_obj) return callback()
     var found = false
+    utxo_obj.assets = utxo_obj.assets || []
     utxo_obj.assets.forEach(function (asset) {
       if (!found && asset.assetId === assetId) {
         found = true
@@ -628,26 +630,60 @@ var find_transactions_by_intervals = function (assetId, start, end, interval, ca
   })
 }
 
-var find_cc_transactions = function (limit, callback) {
+var find_cc_transactions = function (skip, limit, callback) {
   limit = limit || 10
   limit = parseInt(limit, 10)
-  limit = Math.min(limit, 100)
+  limit = Math.min(limit, 5000)
 
-  var conditions = {
-    colored: true,
-    ccparsed: true,
-    blockheight: -1
-  }
-  RawTransactions.find(conditions, no_id).lean().sort('-_id').limit(limit).exec(function (err, txs) {
+  skip = skip || 0
+  skip = parseInt(skip, 10)
+
+  var txs
+
+  async.waterfall([
+    function (cb) {
+      var conditions = {
+        colored: true,
+        ccparsed: true,
+        blockheight: -1
+      }
+      RawTransactions.find(conditions, no_id).lean().sort('-blocktime').limit(limit).skip(skip).exec(cb)
+    },
+    function (mempool_txs, cb) {
+      txs = mempool_txs
+      if (txs.length) {
+        limit -= txs.length
+        skip = 0
+        return cb()
+      }
+      var conditions = {
+        colored: true,
+        ccparsed: true,
+        blockheight: -1
+      }
+      RawTransactions.find(conditions).count().exec(function (err, count) {
+        if (err) return cb(err)
+        skip -= count
+        skip = Math.max(skip, 0)
+        cb()
+      })
+    },
+    function (cb) {
+      if (!limit) return cb()
+       var conditions = {
+        colored: true,
+        ccparsed: true,
+        blockheight: {$gte: 0}
+      }
+      RawTransactions.find(conditions, no_id).lean().sort('-blockheight').limit(limit).exec(function (err, conf_txs) {
+        if (err) return cb(err)
+        txs = txs.concat(conf_txs)
+        cb()
+      })
+    }
+  ], function (err) {
     if (err) return callback(err)
-    limit = limit - txs.length
-    if (!limit) return callback(null, txs)
-    delete conditions.blockheight
-    RawTransactions.find(conditions, no_id).lean().sort('-blockheight').limit(limit).exec(function (err, conf_txs) {
-      if (err) callback(err)
-      txs = txs.concat(conf_txs)
-      callback(null, txs)
-    })
+    callback(null, txs)
   })
 }
 
@@ -692,7 +728,11 @@ var find_popular_assets = function (sort_by, limit, callback) {
 }
 
 var find_utxo = function (txid, index, callback) {
-  Utxos.findOne({txid: txid, index: index}, no_id).lean().exec(callback)
+  Utxos.findOne({txid: txid, index: index}, no_id).lean().exec(function (err, utxo) {
+    if (err) return callback(err)
+    if (utxo) utxo.assets = utxo.assets || []
+    callback(null, utxo)
+  })
 }
 
 var find_utxos = function (utxos, callback) {
@@ -700,7 +740,12 @@ var find_utxos = function (utxos, callback) {
   var or = utxos.map(function (utxo) {
     return {txid: utxo.txid, index: utxo.index}
   })
-  Utxos.find({$or: or}, no_id).lean().exec(callback)
+  Utxos.find({$or: or}, no_id).lean().exec(function (err, txos) {
+    if (err) return callback(err)
+    txos.forEach(function (utxo) {
+      utxo.assets = utxo.assets || []
+    })
+  })
 }
 
 var is_asset = function (assetId, callback) {
@@ -875,8 +920,10 @@ var get_cc_transactions = function (req, res, next) {
   var limit = params.limit || 10
   limit = parseInt(limit, 10)
   limit = Math.min(limit, 100)
+  var skip = params.skip || 0
+  skip = parseInt(skip, 10)
 
-  find_cc_transactions(limit, function (err, transactions) {
+  find_cc_transactions(skip, limit, function (err, transactions) {
     if (err) return next(err)
     res.send(transactions)
   })
