@@ -745,6 +745,7 @@ var find_utxos = function (utxos, callback) {
     txos.forEach(function (utxo) {
       utxo.assets = utxo.assets || []
     })
+    callback(null, txos)
   })
 }
 
