@@ -513,7 +513,6 @@ var find_block_with_transactions = function (height_or_hash, colored, callback) 
     if (block && block.tx) {
       find_transactions(block.tx, colored, function (err, transactions) {
         if (err) return callback(err)
-        block = block.toJSON()
         block.transactions = transactions
         return callback(null, block)
       })
