@@ -674,7 +674,7 @@ var find_cc_transactions = function (skip, limit, callback) {
         ccparsed: true,
         blockheight: {$gte: 0}
       }
-      RawTransactions.find(conditions, no_id).lean().sort('-blockheight').limit(limit).exec(function (err, conf_txs) {
+      RawTransactions.find(conditions, no_id).lean().sort('-blockheight').limit(limit).skip(skip).exec(function (err, conf_txs) {
         if (err) return cb(err)
         txs = txs.concat(conf_txs)
         cb()
