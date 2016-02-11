@@ -7,6 +7,7 @@ coverage/
 install.bat
 license.json
 .DS_store
+.vscode/
 settings/properties.conf
 settings/properties2.conf
 settings/properties - Copy.conf
@@ -17,3 +18,6 @@ config/properties_local.conf
 config/properties_mainnet.conf
 config/properties_dev.conf
 config/properties_dev_mainnet.conf
+tsd-debug.log
+tsd.json
+typings/

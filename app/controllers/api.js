@@ -1,11 +1,18 @@
 var bitcoin = require('bitcoinjs-lib')
 var async = require('async')
 var moment = require('moment')
+var Cache = require('ttl')
+
 var casimir = global.casimir
 var properties = casimir.properties
 var db = casimir.db
 var logger = casimir.logger
 var scanner = casimir.scanner
+var cache = new Cache({
+  ttl: 10 * 1000, // 10 Seconds
+  capacity: 300
+})
+
 var Blocks = db.get_model('Blocks')
 var RawTransactions = db.get_model('RawTransactions')
 var Utxos = db.get_model('Utxo')
@@ -903,59 +910,94 @@ var parse_tx = function (req, res, next) {
 }
 
 var get_popular_assets = function (req, res, next) {
-  var params = req.data
-  var sort_by = params.sortBy
-  var limit = params.limit || 10
-  limit = parseInt(limit, 10)
-  limit = Math.min(limit, 100)
+  var cache_key = req.originalUrl
+  var ttl = 12 * 60 * 60 * 1000 // 12 hours
+  var assets = cache.get(cache_key)
 
-  find_popular_assets(sort_by, limit, function (err, assets) {
-    if (err) return next(err)
+  if (assets) {
     res.send(assets)
-  })
+  } else {
+    var params = req.data
+    var sort_by = params.sortBy
+    var limit = params.limit || 10
+    limit = parseInt(limit, 10)
+    limit = Math.min(limit, 100)
+
+    find_popular_assets(sort_by, limit, function (err, assets) {
+      if (err) return next(err)
+      cache.put(cache_key, assets, ttl)
+      res.send(assets)
+    })
+  }
 }
 
 var get_cc_transactions = function (req, res, next) {
-  var params = req.data
-  var limit = params.limit || 10
-  limit = parseInt(limit, 10)
-  limit = Math.min(limit, 100)
-  var skip = params.skip || 0
-  skip = parseInt(skip, 10)
+  var cache_key = req.originalUrl
+  var ttl = 1 * 60 * 1000 // 1 minute
+  var transactions = cache.get(cache_key)
 
-  find_cc_transactions(skip, limit, function (err, transactions) {
-    if (err) return next(err)
+  if (transactions) {
     res.send(transactions)
-  })
+  } else {
+    var params = req.data
+    var limit = params.limit || 10
+    limit = parseInt(limit, 10)
+    limit = Math.min(limit, 100)
+    var skip = params.skip || 0
+    skip = parseInt(skip, 10)
 
+    find_cc_transactions(skip, limit, function (err, transactions) {
+      if (err) return next(err)
+      cache.put(cache_key, transactions, ttl)
+      res.send(transactions)
+    })
+  }
 }
 
 var get_transactions_by_intervals = function (req, res, next) {
-  var params = req.data
-  var start = params.start
-  var end = params.end
-  var interval = params.interval
-  var assetId = params.assetId
+  var cache_key = req.originalUrl
+  var ttl = 12 * 60 * 60 * 1000 // 12 hours
+  var intervals = cache.get(cache_key)
 
-  try {
-    start = parseInt(start, 10)
-    end = parseInt(end, 10)
-    interval = parseInt(interval, 10)
-  } catch (e) {
-    return next(e)
+  if (intervals) {
+    res.send(intervals)
+  } else {
+    var params = req.data
+    var start = params.start
+    var end = params.end
+    var interval = params.interval
+    var assetId = params.assetId
+
+    try {
+      start = parseInt(start, 10)
+      end = parseInt(end, 10)
+      interval = parseInt(interval, 10)
+    } catch (e) {
+      return next(e)
+    }
+
+    find_transactions_by_intervals(assetId, start, end, interval, function (err, intervals) {
+      if (err) return next(err)
+      cache.put(cache_key, intervals, ttl)
+      return res.send(intervals)
+    })
   }
-
-  find_transactions_by_intervals(assetId, start, end, interval, function (err, intervals) {
-    if (err) return next(err)
-    return res.send(intervals)
-  })
 }
 
 var get_main_stats = function (req, res, next) {
-  find_main_stats(function (err, main_stats) {
-    if (err) return next(err)
-    return res.send(main_stats)
-  })
+  var cache_key = req.originalUrl
+  var ttl = 1 * 60 * 60 * 1000 // 1 hour
+  var main_stats = cache.get(cache_key)
+
+  if (main_stats) {
+    res.send(main_stats)
+  } else {
+    find_main_stats(function (err, main_stats) {
+      cache.put(cache_key, main_stats, ttl)
+      if (err) return next(err)
+      return res.send(main_stats)
+    })
+  }
 }
 
 var get_block = function (req, res, next) {
@@ -1138,13 +1180,22 @@ var get_asset_holders = function (req, res, next) {
 }
 
 var get_blocks = function (req, res, next) {
-  var params = req.data
-  var start = params.start
-  var end = params.end
-  find_blocks(start, end, function (err, blocks) {
-    if (err) return next(err)
-    return res.send(blocks)
-  })
+  var cache_key = req.originalUrl
+  var ttl = 3 * 60 * 1000 // 3 minutes
+  var blocks = cache.get(cache_key)
+
+  if (blocks) {
+    res.send(blocks)
+  } else {
+    var params = req.data
+    var start = params.start
+    var end = params.end
+    find_blocks(start, end, function (err, blocks) {
+      if (err) return next(err)
+      cache.put(cache_key, blocks, ttl)
+      return res.send(blocks)
+    })
+  }
 }
 
 var get_block_with_transactions = function (req, res, next) {
