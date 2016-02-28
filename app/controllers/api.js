@@ -932,26 +932,17 @@ var get_popular_assets = function (req, res, next) {
 }
 
 var get_cc_transactions = function (req, res, next) {
-  var cache_key = req.originalUrl
-  var ttl = 1 * 60 * 1000 // 1 minute
-  var transactions = cache.get(cache_key)
+  var params = req.data
+  var limit = params.limit || 10
+  limit = parseInt(limit, 10)
+  limit = Math.min(limit, 100)
+  var skip = params.skip || 0
+  skip = parseInt(skip, 10)
 
-  if (transactions) {
+  find_cc_transactions(skip, limit, function (err, transactions) {
+    if (err) return next(err)
     res.send(transactions)
-  } else {
-    var params = req.data
-    var limit = params.limit || 10
-    limit = parseInt(limit, 10)
-    limit = Math.min(limit, 100)
-    var skip = params.skip || 0
-    skip = parseInt(skip, 10)
-
-    find_cc_transactions(skip, limit, function (err, transactions) {
-      if (err) return next(err)
-      cache.put(cache_key, transactions, ttl)
-      res.send(transactions)
-    })
-  }
+  })
 }
 
 var get_transactions_by_intervals = function (req, res, next) {
@@ -1180,22 +1171,13 @@ var get_asset_holders = function (req, res, next) {
 }
 
 var get_blocks = function (req, res, next) {
-  var cache_key = req.originalUrl
-  var ttl = 3 * 60 * 1000 // 3 minutes
-  var blocks = cache.get(cache_key)
-
-  if (blocks) {
-    res.send(blocks)
-  } else {
-    var params = req.data
-    var start = params.start
-    var end = params.end
-    find_blocks(start, end, function (err, blocks) {
-      if (err) return next(err)
-      cache.put(cache_key, blocks, ttl)
-      return res.send(blocks)
-    })
-  }
+  var params = req.data
+  var start = params.start
+  var end = params.end
+  find_blocks(start, end, function (err, blocks) {
+    if (err) return next(err)
+    return res.send(blocks)
+  })
 }
 
 var get_block_with_transactions = function (req, res, next) {
