@@ -57,7 +57,8 @@
       "assetId"
     ],
     "optional": [
-      "utxo"
+      "utxo",
+      "verbosity"
     ]
   },
   "/api/getmainstats" : {

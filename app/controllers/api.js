@@ -299,6 +299,14 @@ var find_address_utxos = function (address, confirmations, callback) {
   })
 }
 
+var count_asset_transactions = function (assetId, type, callback) {
+  var conditions = {assetId: assetId}
+  if (type) {
+    conditions.type = type
+  }
+  AssetsTransactions.count(conditions).lean().exec(callback)  
+}
+
 var find_asset_transactions = function (assetId, confirmations, type, callback) {
   if (typeof type === 'function') {
     callback = type
@@ -353,6 +361,22 @@ var find_asset_transactions = function (assetId, confirmations, type, callback) 
     if (err) return callback(err)
     ans.transactions = transactions
     return callback(null, ans)
+  })
+}
+
+var find_asset_first_block = function (assetId, callback) {
+  var conditions = {assetId: assetId}
+  conditions.type = 'issuance'
+  AssetsTransactions.find(conditions).lean().exec(function (err, assets_transactions) {
+    if (err) return callback(err)
+    var txids = []
+    assets_transactions.forEach(function (asset_transaction) {
+      txids.push(asset_transaction.txid)
+    })
+    RawTransactions.find({txid: {$in: txids}, blockheight: {$gte: 0}}, {blockheight:1, _id:0}).sort({blockheight: 1}).limit(1).lean().exec(function (err, transactions) {
+      if (err) return callback(err)
+      callback(null, transactions[0].blockheight)
+    })
   })
 }
 
@@ -477,40 +501,67 @@ var find_asset_holders = function (assetId, confirmations, callback) {
   })
 }
 
-var find_asset_info = function (assetId, callback) {
-  var asset_info
-  async.waterfall([
-    function (cb) {
-      find_asset_holders(assetId, 0, cb)
-    },
-    function (holders, cb) {
-      asset_info = holders
-      asset_info.totalSupply = 0
-      asset_info.numOfHolders = 0
-      holders.holders.forEach(function (asset) {
-        asset_info.totalSupply += asset.amount
-        asset_info.numOfHolders++
-      })
+var find_asset_info = function (assetId, with_transactions, callback) {
+  if (typeof with_transactions == 'function') {
+    callback = with_transactions
+    with_transactions = false
+  }
+
+  var functions = []
+  functions[0] = function (cb) {
+    find_asset_holders(assetId, 0, cb)
+  }
+  if (!with_transactions) {
+    functions[1] = function (cb) {
+      count_asset_transactions(assetId, 'transfer', cb)
+    }
+    functions[2] = function (cb) {
+      count_asset_transactions(assetId, 'issuance', cb)
+    }
+    functions[3] = function (cb) {
+      find_asset_first_block(assetId, cb)
+    }
+
+  } else {
+    functions[1] = function (cb) {
       find_asset_transactions(assetId, 0, 'transfer', cb)
-    },
-    function (transfers, cb) {
-      asset_info.transfers = transfers.transactions
-      asset_info.numOfTransfers = transfers.transactions.length
+    }
+    functions[2] = function (cb) {
       find_asset_transactions(assetId, 0, 'issuance', cb)
-    },
-    function (issuances, cb) {
-      asset_info.issuances = issuances.transactions
-      asset_info.numOfIssuance = issuances.transactions.length
-      issuances.transactions.forEach(function (transaction) {
+    }
+  }
+
+  async.parallel(functions,
+  function (err, results) {
+    if (err) return callback(err)
+
+    var holders = results[0]
+    var asset_info = holders
+    asset_info.totalSupply = 0
+    asset_info.numOfHolders = 0
+    holders.holders.forEach(function (asset) {
+      asset_info.totalSupply += asset.amount
+      asset_info.numOfHolders++
+    })
+
+    if (!with_transactions) {
+      asset_info.numOfTransfers = results[1]
+      asset_info.numOfIssuance = results[2]
+      asset_info.firstBlock = results[3]
+
+    } else {
+      asset_info.transfers = results[1]
+      asset_info.issuances = results[2]
+      asset_info.numOfTransfers = asset_info.transfers.length
+      asset_info.numOfIssuances = asset_info.issuances.length
+      asset_info.issuances.transactions.forEach(function (transaction) {
         if (!asset_info.firstBlock || asset_info.firstBlock === -1 || (transaction.blockheight !== -1 && asset_info.firstBlock > transaction.blockheight)) {
           asset_info.firstBlock = transaction.blockheight
         }
       })
-      cb()
     }
-  ],
-  function (err) {
-    return callback(err, asset_info)
+
+    return callback(null, asset_info)
   })
 }
 
@@ -720,8 +771,6 @@ var find_popular_assets = function (sort_by, limit, callback) {
     async.each(asset_counts, function (asset_count, cb) {
       find_asset_info(asset_count._id.assetId, function (err, info) {
         if (err) return cb(err)
-        if ('transfers' in info) delete info['transfers']
-        if ('issuances' in info) delete info['issuances']
         if ('holders' in info) delete info['holders']
         assets[assetsOrder[asset_count._id.assetId]] = info
         cb()
@@ -1015,27 +1064,36 @@ var get_asset_info = function (req, res, next) {
   var params = req.data
   var assetId = params.assetId
   var utxo = params.utxo
+  var verbosity = parseInt(params.verbosity)
+  verbosity = ([0,1,2].indexOf(verbosity) > -1)? verbosity : 1
 
   logger.debug(utxo)
 
-  find_asset_info(assetId, function (err, info) {
+  async.parallel([
+    function (cb) {
+      if (verbosity == 0) return cb()
+      find_asset_info(assetId, (verbosity == 2), cb) 
+    },
+    function (cb) {
+      if (!utxo) return cb()
+      find_first_issuance(assetId, utxo, cb)  
+    }
+  ],
+  function (err, results) {
     if (err) return next(err)
-    if ('transfers' in info) delete info['transfers']
-    if ('issuances' in info) delete info['issuances']
-    if ('holders' in info) delete info['holders']
-    if (!utxo) return res.send(info)
-    find_first_issuance(assetId, utxo, function (err, issuance_txid) {
-      if (err) return next(err)
-      info.issuanceTxid = issuance_txid
-      return res.send(info)
-    })
+    var asset_info = results[0] || {}
+    var issuanceTxid = results[1]
+    if (issuanceTxid) asset_info.issuanceTxid = issuanceTxid
+    if ((verbosity < 2) && ('holders' in asset_info)) delete asset_info['holders']
+    res.send(asset_info)
   })
 }
+
 var get_asset_info_with_transactions = function (req, res, next) {
   var params = req.data
   var assetId = params.assetId
 
-  find_asset_info(assetId, function (err, info) {
+  find_asset_info(assetId, true, function (err, info) {
     if (err) return next(err)
     return res.send(info)
   })
