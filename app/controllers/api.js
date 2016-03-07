@@ -375,7 +375,8 @@ var find_asset_first_block = function (assetId, callback) {
     })
     RawTransactions.find({txid: {$in: txids}, blockheight: {$gte: 0}}, {blockheight:1, _id:0}).sort({blockheight: 1}).limit(1).lean().exec(function (err, transactions) {
       if (err) return callback(err)
-      callback(null, transactions[0].blockheight)
+      var blockheight = transactions.length? transactions[0].blockheight : -1
+      callback(null, blockheight)
     })
   })
 }
