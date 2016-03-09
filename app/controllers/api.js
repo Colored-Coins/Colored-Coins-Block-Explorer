@@ -551,11 +551,11 @@ var find_asset_info = function (assetId, with_transactions, callback) {
       asset_info.firstBlock = results[3]
 
     } else {
-      asset_info.transfers = results[1]
-      asset_info.issuances = results[2]
+      asset_info.transfers = results[1].transactions
+      asset_info.issuances = results[2].transactions
       asset_info.numOfTransfers = asset_info.transfers.length
       asset_info.numOfIssuances = asset_info.issuances.length
-      asset_info.issuances.transactions.forEach(function (transaction) {
+      asset_info.issuances.forEach(function (transaction) {
         if (!asset_info.firstBlock || asset_info.firstBlock === -1 || (transaction.blockheight !== -1 && asset_info.firstBlock > transaction.blockheight)) {
           asset_info.firstBlock = transaction.blockheight
         }
