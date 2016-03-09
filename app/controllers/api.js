@@ -1066,7 +1066,7 @@ var get_asset_info = function (req, res, next) {
   var assetId = params.assetId
   var utxo = params.utxo
   var verbosity = parseInt(params.verbosity)
-  verbosity = ([0,1,2].indexOf(verbosity) > -1)? verbosity : 1
+  verbosity = ([0,1].indexOf(verbosity) > -1)? verbosity : 1
 
   logger.debug(utxo)
 
