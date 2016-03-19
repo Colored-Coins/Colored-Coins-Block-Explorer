@@ -5,7 +5,7 @@
 
 > The ColoredCoins Block Explorer server
 
-### System Requirement
+### System Requirements
 
 1. Bitcoind that runs as an RPC server with txindex=1
 2. Mongodb
@@ -33,7 +33,7 @@ You can run the Block Explorer with the following options:
     -c, --conf <config-file-path>                      Load a custom configuration file
 ```
 
-Or just run it with the defualts using:
+Or just run it with the defaults using:
 
 ```sh
 $ cc-explorer
@@ -44,8 +44,8 @@ $ cc-explorer
 #### The propeties to provide:
 
 - Empty uncommented properites are MANDATORY
-- Commented properties are OPTINAL
-- Non empty uncommented properties are the DEFUALT values but can changed if wanted
+- Commented properties are OPTIONAL
+- Non empty uncommented properties are the DEFAULT values but can be changed if wanted
 
 ```ini
 [ENV]

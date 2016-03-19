@@ -1073,7 +1073,7 @@ var get_asset_info = function (req, res, next) {
   async.parallel([
     function (cb) {
       if (verbosity == 0) return cb()
-      find_asset_info(assetId, (verbosity == 2), cb) 
+      find_asset_info(assetId, false, cb) 
     },
     function (cb) {
       if (!utxo) return cb()
