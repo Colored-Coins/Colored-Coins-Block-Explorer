@@ -1,6 +1,6 @@
 {
   "name": "cc-block-explorer",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Colored Coins Block Explorer",
   "main": "app.js",
   "dependencies": {
