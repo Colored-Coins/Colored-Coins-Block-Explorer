@@ -1,6 +1,5 @@
 var bitcoin = require('bitcoinjs-lib')
 var async = require('async')
-var _ = require('lodash')
 var moment = require('moment')
 var Cache = require('ttl')
 
@@ -243,7 +242,6 @@ var find_address_info = function (address, confirmations, callback) {
 
 var find_addresses_utxos = function (addresses, confirmations, callback) {
   var ans = []
-  addresses = _.uniq(addresses)
   async.each(addresses, function (address, cb) {
     find_address_utxos(address, confirmations, function (err, utxos) {
       if (err) return cb(err)
