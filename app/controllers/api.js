@@ -474,6 +474,7 @@ var find_asset_holders = function (assetId, confirmations, callback) {
               }
               divisibility = asset.divisibility
               lockStatus = asset.lockStatus
+              aggregationPolicy = asset.aggregationPolicy
               if (utxo.scriptPubKey && utxo.scriptPubKey.addresses) {
                 utxo.scriptPubKey.addresses.forEach(function (address) {
                   holders[address] = holders[address] || 0
@@ -490,6 +491,7 @@ var find_asset_holders = function (assetId, confirmations, callback) {
       holders: [],
       divisibility: divisibility,
       lockStatus: lockStatus,
+      aggregationPolicy: aggregationPolicy,
       someUtxo: some_utxo
     }
     for (var address in holders) {
