@@ -61,7 +61,9 @@ process.on('message', function (msg) {
 
 async.waterfall([
   function (callback) {
-    db.init(properties.db, mongoose, callback)
+    db.sequelize.sync()
+      .then(function (res) { callback(null, res)  })
+      .catch(callback)
   },
   function (mongoose, callback) {
     if (process.env.ROLE === properties.roles.API) {
@@ -76,7 +78,7 @@ async.waterfall([
   },
   function (app, callback) {
     var settings = {
-      debug: false,
+      debug: process.env.DEBUG || properties.logger.debug,
       properties: properties,
       next_hash: properties.next_hash,
       last_hash: properties.last_hash,
@@ -92,7 +94,7 @@ async.waterfall([
       }
     }
     casimir.scanner = scanner = new Scanner(settings, mongoose)
-    if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
+    // if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
     if (properties.scanner.scan === 'true' && properties.scanner.mempool_only !== 'true') {
       if (process.env.ROLE === properties.roles.SCANNER) scanner.scan_blocks()
       if (process.env.ROLE === properties.roles.FIXER) scanner.fix_blocks()
