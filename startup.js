@@ -77,7 +77,7 @@ async.waterfall([
   },
   function (app, callback) {
     var settings = {
-      debug: process.env.DEBUG || properties.logger.debug,
+      debug: (process.env.DEBUG === 'true') || (properties.basic.debug === 'true'),
       properties: properties,
       next_hash: properties.next_hash,
       last_hash: properties.last_hash,

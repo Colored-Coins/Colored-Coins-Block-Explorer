@@ -42,7 +42,7 @@ var routes = {
 }
 
 // Framework modules
-
+properties.db.dir = __dirname + '/../' + properties.db.dir
 var db = casimir_core.sqldb(properties.db)
 
 var requestSettings = {
