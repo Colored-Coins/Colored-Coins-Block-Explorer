@@ -1,4 +1,3 @@
-var mongoose = require('mongoose')
 var async = require('async')
 
 var casimir = global.casimir
@@ -65,7 +64,7 @@ async.waterfall([
       .then(function (res) { callback(null, res)  })
       .catch(callback)
   },
-  function (mongoose, callback) {
+  function (res, callback) {
     if (process.env.ROLE === properties.roles.API) {
       global.mempool = false
       server.http_server.listen(server.port, function () {
@@ -93,7 +92,7 @@ async.waterfall([
         timeout: parseInt(process.env.BITCOINTIMEOUT || properties.bitcoin_rpc.timeout, 10)
       }
     }
-    casimir.scanner = scanner = new Scanner(settings, mongoose)
+    casimir.scanner = scanner = new Scanner(settings, db)
     // if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
     if (properties.scanner.scan === 'true' && properties.scanner.mempool_only !== 'true') {
       if (process.env.ROLE === properties.roles.SCANNER) scanner.scan_blocks()
