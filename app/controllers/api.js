@@ -1,6 +1,7 @@
 var casimir = global.casimir
 var properties = casimir.properties
 var db = casimir.db
+var async = require('async')
 var _ = require('lodash')
 
 var Sequelize = db.Sequelize
@@ -16,6 +17,7 @@ var AssetsTransactions = db.assetstransactions
 var AssetsAddresses = db.assetsaddresses
 var Assets = db.assets
 
+var transactionAttributes = {exclude: ['index_in_block']}
 var inputAttributes = {exclude: ['output_id', 'input_txid', 'input_index']}
 var outputAttributes = {exclude: ['id', 'txid']}
 
@@ -30,6 +32,34 @@ var get_transaction = function (req, res, next) {
   find_transaction(txid, function (err, tx) {
     if (err) return next(err)
     return res.send(tx)
+  })
+}
+
+var get_addresses_info = function (req, res, next) {
+  var params = req.data
+  var addresses = params.addresses
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_addresses_info(addresses, confirmations, function (err, infos) {
+    if (err) return next(err)
+    infos.forEach(function (info) {
+      if ('transactions' in info) delete info['transactions']
+      if ('utxos' in info) delete info['utxos']
+    })
+    return res.send(infos)
+  })
+}
+
+var get_addresses_info_with_transactions = function (req, res, next) {
+  var params = req.data
+  var addresses = params.addresses
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_addresses_info(addresses, confirmations, function (err, infos) {
+    if (err) return next(err)
+    return res.send(infos)
   })
 }
 
@@ -59,7 +89,7 @@ var get_address_info = function (req, res, next) {
   var confirmations = params.confirmations || 0
   confirmations = parseInt(confirmations, 10)
 
-  find_address_info(address, false, confirmations, function (err, info) {
+  find_address_info(address, confirmations, function (err, info) {
     if (err) return next(err)
     if ('transactions' in info) delete info['transactions']
     if ('utxos' in info) delete info['utxos']
@@ -73,7 +103,7 @@ var get_address_info_with_transactions = function (req, res, next) {
   var confirmations = params.confirmations || 0
   confirmations = parseInt(confirmations, 10)
 
-  find_address_info(address, true, confirmations, function (err, info) {
+  find_address_info(address, confirmations, function (err, info) {
     if (err) return next(err)
     return res.send(info)
   })
@@ -135,9 +165,33 @@ var get_utxos = function (req, res, next) {
   })
 }
 
+var parse_tx = function (req, res, next) {
+  console.log('parse_tx')
+  var params = req.data
+  var txid = params.txid || ''
+  var callback
+  console.time('parse_tx: full_parse ' + txid)
+  callback = function (data) {
+    console.log('data = ', data)
+    if (data.priority_parsed === txid) {
+      console.log('data.priority_parsed === txid === ', txid)
+      console.timeEnd('parse_tx: full_parse ' + txid)
+      process.removeListener('message', callback)
+      if (data.err) return next(data.err)
+      res.send({txid: txid})
+    }
+  }
+
+  process.on('message', callback)
+
+  console.time('priority_parse: api_to_parent ' + txid)
+  process.send({to: properties.roles.SCANNER, parse_priority: txid})
+  console.timeEnd('priority_parse: api_to_parent ' + txid)
+}
+
 var find_transaction = function (txid, callback) {
   Transactions.findById(txid, {
-    attributes: { exclude: ['index_in_block'] },
+    attributes: transactionAttributes,
     include: [
       { model: Inputs, as: 'vin', attributes: inputAttributes, include: [
         { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
@@ -181,7 +235,7 @@ var find_block = function (height_or_hash, with_transactions, callback) {
   if (!with_transactions) {
     include[0].attributes = ['txid']
   } else {
-    include[0].attributes = {exclude: ['index_in_block']}
+    include[0].attributes = transactionAttributes
     include[0].include = [
       { model: Inputs, as: 'vin', attributes: inputAttributes, include: [
         { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
@@ -202,7 +256,21 @@ var find_block = function (height_or_hash, with_transactions, callback) {
     })
 }
 
-var find_address_info = function (address, with_transactions, confirmations, callback) {
+var find_addresses_info = function (addresses, confirmations, callback) {
+  var ans = []
+  async.each(addresses, function (address, cb) {
+    find_address_info(address, confirmations, function (err, address_info) {
+      if (err) return cb(err)
+      ans.push(address_info)
+      cb()
+    })
+  },
+  function (err) {
+    return callback(err, ans)
+  })
+}
+
+var find_address_info = function (address, confirmations, callback) {
   var ans = {
     address: address
   }
@@ -218,32 +286,23 @@ var find_address_info = function (address, with_transactions, confirmations, cal
   var include = [
     {
       model: Transactions,
-      attributes: { exclude: ['index_in_block'] },
+      attributes: transactionAttributes,
       as: 'transaction',
       where: !confirmations ? null : {
         blockheight: { $gte: 0, $lte: properties.last_block - confirmations + 1 }
       },
-      order: [{model: Outputs, as: 'vout'}, 'n', 'ASC']
+      include: [
+        { model: Inputs, as: 'vin', attributes: inputAttributes, include: [
+          { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
+        ]}, // TODO Oded - include assets
+        { model: Outputs, as: 'vout', attributes: outputAttributes }        
+      ],
+      order: [
+        [{model: Inputs, as: 'vin'}, 'input_index', 'ASC'],
+        [{model: Outputs, as: 'vout'}, 'n', 'ASC']
+      ]
     }
   ]
-
-  if (!with_transactions) {
-    include[0].include = [
-      {
-        model: Outputs,
-        attributes: {exclude: ['id']},
-        as: 'vout'
-      } // TODO Oded - include assets
-    ]
-  } else {
-    include[0].include = [
-      { model: Inputs, as: 'vin', attributes: inputAttributes, include: [
-        { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
-      ]},
-      { model: Outputs, as: 'vout', attributes: outputAttributes }
-    ]
-    include[0].order.push([{model: Inputs, as: 'vin'}, 'input_index', 'ASC'])
-  }
 
   AddressesTransactions.findAll({ where: where, include: include })
     .then(function (address_transactions) {
@@ -462,7 +521,7 @@ var find_utxos = function (utxos, callback) {
   }
   var attributes = {
     exclude: ['n', 'id'],
-    include: [['n', 'index']]    
+    include: [['n', 'index']]
   }
   var include = [{
     model: Transactions,
@@ -493,6 +552,16 @@ var format_utxo = function (utxo) {
   return currUtxo
 }
 
+var transmit = function (req, res, next) {
+  var params = req.data
+  var txHex = params.txHex
+
+  scanner.transmit(txHex, function (err, ans) {
+    if (err) return next(err)
+    res.send(ans)
+  })
+}
+
 module.exports = {
   get_transaction: get_transaction,
   get_block: get_block,
@@ -500,8 +569,12 @@ module.exports = {
   get_blocks: get_blocks,
   get_address_utxos: get_address_utxos,
   get_addresses_utxos: get_addresses_utxos,
+  parse_tx: parse_tx,
   get_utxo: get_utxo,
   get_utxos: get_utxos,
   get_address_info: get_address_info,
-  get_address_info_with_transactions: get_address_info_with_transactions
+  get_address_info_with_transactions: get_address_info_with_transactions,
+  get_addresses_info: get_addresses_info,
+  get_addresses_info_with_transactions: get_addresses_info_with_transactions,
+  transmit: transmit
 }
