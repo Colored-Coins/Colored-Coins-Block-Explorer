@@ -133,6 +133,35 @@ var get_address_utxos = function (req, res, next) {
   })
 }
 
+var search = function (req, res, next) {
+  console.log('search')
+  var params = req.data
+  var arg = params.arg
+
+  is_transaction(arg, function (err, tx) {
+    if (err) return next(err)
+    if (tx) return res.send({transaction: arg})
+    is_asset(arg, function (err, is_asset) {
+      if (err) return next(err)
+      if (is_asset) return res.send({assetId: arg})
+      try {
+        var address = bitcoin.Address.fromBase58Check(arg)
+        if (address) {
+          return res.send({addressinfo: arg})
+        } else {
+          return next(['Not found.', 404])
+        }
+      } catch (e) {
+        find_block(arg, false, function (err, block) {
+          if (err) return next(err)
+          if (block) return res.send({block: arg})
+          return next(['Not found.', 404])
+        })
+      }
+    })
+  })
+}
+
 var get_blocks = function (req, res, next) {
   var params = req.data
   var start = params.start
@@ -172,9 +201,7 @@ var parse_tx = function (req, res, next) {
   var callback
   console.time('parse_tx: full_parse ' + txid)
   callback = function (data) {
-    console.log('data = ', data)
     if (data.priority_parsed === txid) {
-      console.log('data.priority_parsed === txid === ', txid)
       console.timeEnd('parse_tx: full_parse ' + txid)
       process.removeListener('message', callback)
       if (data.err) return next(data.err)
@@ -189,11 +216,19 @@ var parse_tx = function (req, res, next) {
   console.timeEnd('priority_parse: api_to_parent ' + txid)
 }
 
+var is_transaction = function (txid, callback) {
+  console.log('is_transaction, txid = ', txid)
+  Transactions.findById(txid, {raw: true})
+    .then(function (tx) { callback(!!tx) })
+    .catch(callback)
+}
+
 var find_transaction = function (txid, callback) {
-  Transactions.findById(txid, {
+  Transactions.findAll({
+    where: {txid: txid},
     attributes: transactionAttributes,
     include: [
-      { model: Inputs, as: 'vin', attributes: inputAttributes, include: [
+      { model: Inputs, as: 'vin', attributes: {exclude: ['output_id', 'input_txid']}, include: [
         { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
       ]},
       { model: Outputs, as: 'vout', attributes: outputAttributes }
@@ -201,10 +236,20 @@ var find_transaction = function (txid, callback) {
     order: [
       [{model: Inputs, as: 'vin'}, 'input_index', 'ASC'],
       [{model: Outputs, as: 'vout'}, 'n', 'ASC']
-    ]
-  }).then(function(transaction) {
+    ],
+    raw: true,
+    nest: true
+  }).then(function (rows) {
+    var transaction = {}
+    Object.keys(rows[0]).forEach(function (key) {
+      if (key !== 'vin' && key !== 'vout') {
+        transaction[key] = rows[0][key]
+      }
+    })
+    transaction.vin = _(rows).uniqBy('vin.input_index').map(function (row) { delete row.vin.input_index; return row.vin }).value()
+    transaction.vout = _(rows).uniqBy('vout.n').map('vout').value()
     callback(null, transaction)
-  });
+  })
 }
 
 var find_block = function (height_or_hash, with_transactions, callback) {
@@ -535,6 +580,12 @@ var find_utxos = function (utxos, callback) {
     .catch(callback)
 }
 
+var is_asset = function (assetId, callback) {
+  AssetsTransactions.findOne({where: {assetId: assetId}, raw: true})
+    .then(function (asset_transaction) { callback(null, !!asset_transaction) })
+    .catch(callback)
+}
+
 var format_utxos = function (utxos) {
   return utxos.map(format_utxo)
 }
@@ -569,6 +620,7 @@ module.exports = {
   get_blocks: get_blocks,
   get_address_utxos: get_address_utxos,
   get_addresses_utxos: get_addresses_utxos,
+  search: search,
   parse_tx: parse_tx,
   get_utxo: get_utxo,
   get_utxos: get_utxos,
