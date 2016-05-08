@@ -35,6 +35,17 @@ var get_transaction = function (req, res, next) {
   })
 }
 
+var get_asset_info = function (req, res, next) {
+  var params = req.data
+  var assetId = params.assetId
+  var utxo = params.utxo
+
+  find_asset_info(assetId, utxo, function (err, asset_info) {
+    if (err) return next(err)
+    return res.send(asset_info)
+  })
+}
+
 var get_addresses_info = function (req, res, next) {
   var params = req.data
   var addresses = params.addresses
@@ -223,33 +234,78 @@ var is_transaction = function (txid, callback) {
     .catch(callback)
 }
 
-var find_transaction = function (txid, callback) {
-  Transactions.findAll({
-    where: {txid: txid},
-    attributes: transactionAttributes,
-    include: [
-      { model: Inputs, as: 'vin', attributes: {exclude: ['output_id', 'input_txid']}, include: [
-        { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
-      ]},
-      { model: Outputs, as: 'vout', attributes: outputAttributes }
-    ],
-    order: [
-      [{model: Inputs, as: 'vin'}, 'input_index', 'ASC'],
-      [{model: Outputs, as: 'vout'}, 'n', 'ASC']
-    ],
-    raw: true,
-    nest: true
-  }).then(function (rows) {
-    var transaction = {}
-    Object.keys(rows[0]).forEach(function (key) {
-      if (key !== 'vin' && key !== 'vout') {
-        transaction[key] = rows[0][key]
-      }
-    })
-    transaction.vin = _(rows).uniqBy('vin.input_index').map(function (row) { delete row.vin.input_index; return row.vin }).value()
-    transaction.vout = _(rows).uniqBy('vout.n').map('vout').value()
-    callback(null, transaction)
+var to_sql_columns = function (model, options) {
+  var columns = []
+  var table_name = model.getTableName()
+  Object.keys(model.attributes).forEach(function (attribute) {
+    if (!options || !options.exclude || options.exclude.indexOf(attribute) === -1) {
+      columns.push(table_name + '."' + attribute + '"')
+    }
   })
+  return columns.join(', ') + (options.last ? '' : ',')
+}
+
+var find_transaction_query = [
+  'SELECT',
+  '  ' + to_sql_columns(Transactions, {exclude: ['index_in_block']}),
+  '  to_json(array(',
+  '    SELECT',
+  '      vin',
+  '    FROM',
+  '      (SELECT',
+  '       ' + to_sql_columns(Inputs, {exclude: ['input_index', 'input_txid', 'output_id']}),
+  '       "previousOutput"."scriptPubKey" AS "previousOutput",',
+  '       to_json(array(',
+  '          SELECT',
+  '            assets',
+  '          FROM',
+  '            (SELECT',
+  '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}),
+  '              assets.*',
+  '            FROM',
+  '              assetsoutputs',
+  '            INNER JOIN assets ON assets."assetId" = assetsoutputs."assetId"',
+  '            WHERE assetsoutputs.output_id = inputs.output_id ORDER BY index_in_output)',
+  '        AS assets)) AS assets',
+  '      FROM',
+  '        inputs',
+  '      INNER JOIN',
+  '        (SELECT outputs.id, outputs."scriptPubKey"',
+  '         FROM outputs) AS "previousOutput" ON "previousOutput".id = inputs.output_id',
+  '      WHERE',
+  '        inputs.input_txid = transactions.txid',
+  '      ORDER BY input_index) AS vin)) AS vin,',
+  '  to_json(array(',
+  '    SELECT',
+  '      vout',
+  '    FROM',
+  '      (SELECT',
+  '        ' + to_sql_columns(Outputs, {exclude: ['id', 'txid']}),
+  '        to_json(array(',
+  '         SELECT assets FROM',
+  '           (SELECT',
+  '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}),
+  '              assets.*',
+  '            FROM',
+  '              assetsoutputs',
+  '            INNER JOIN assets ON assets."assetId" = assetsoutputs."assetId"',
+  '            WHERE assetsoutputs.output_id = outputs.id ORDER BY index_in_output)',
+  '        AS assets)) AS assets',
+  '      FROM',
+  '        outputs',
+  '      WHERE outputs.txid = transactions.txid',
+  '      ORDER BY n) AS vout)) AS vout',
+  'FROM',
+  '  transactions',
+  'WHERE',
+  '  txid = :txid;'
+].join('\n')
+
+var find_transaction = function (txid, callback) {
+  sequelize.query(find_transaction_query, {replacements: {txid: txid}, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (transactions) {
+      callback(null, transactions[0])
+    })
 }
 
 var find_block = function (height_or_hash, with_transactions, callback) {
@@ -535,6 +591,101 @@ var find_blocks = function (start, end, callback) {
     .catch(callback)
 }
 
+var find_asset_info = function (assetId, utxo, callback) {
+  var find_asset_info_query = [
+    'SELECT',
+    '  assetsoutputs."assetId",',
+    utxo ? '  min(CASE WHEN assetsoutputs.txid = :txid AND assetsoutputs.n = :n THEN assetsoutputs."issueTxid" ELSE NULL END) AS "issuanceTxid",' : '',
+    '  min(assetsoutputs.blockheight) AS "firstBlock",',
+    '  min(assetsoutputs.txid || \':\' || assetsoutputs.n) AS "someUtxo",',
+    '  min(assetsoutputs.divisibility) AS divisibility,',
+    '  min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",',
+    '  bool_or(assetsoutputs."lockStatus") AS "lockStatus",',
+    '  to_json(array_agg(holders) FILTER (WHERE used = false)) as holders,',
+    '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'issuance\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfIssuance",',
+    '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'transfer\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfTransfers",',
+    '  sum(CASE WHEN assetsoutputs.used = false THEN assetsoutputs.amount ELSE NULL END) AS "totalSupply"',
+    'FROM',
+    '  (select',
+    '    assets.*,',
+    '    assetsoutputs.amount,',
+    '    assetsoutputs."issueTxid",',
+    '    outputs.txid,',
+    '    outputs.n,',
+    '    outputs.used,',
+    '    json_build_object(\'addresses\', outputs.addresses, \'amount\', amount) AS holders,',
+    '    transactions.blockheight,',
+    '    transactions.type',
+    '  FROM',
+    '    assets',
+    '  LEFT OUTER JOIN (',
+    '    SELECT',
+    '      assetsoutputs.output_id,',
+    '      assetsoutputs."issueTxid",',
+    '      assetsoutputs.amount,',
+    '      assetsoutputs."assetId"',
+    '    FROM',
+    '      assetsoutputs',
+    '    ) AS assetsoutputs ON assetsoutputs."assetId" = assets."assetId"',
+    '  INNER JOIN (',
+    '      SELECT',
+    '        outputs.id,',
+    '        outputs.used,',
+    '        outputs.txid,',
+    '        outputs.n,',
+    '        outputs."scriptPubKey"->\'addresses\' AS addresses',
+    '      FROM',
+    '        outputs',
+    '    ) AS outputs ON outputs.id = assetsoutputs.output_id',
+    '  INNER JOIN (',
+    '    SELECT',
+    '      transactions.txid,',
+    '      transactions.blockheight,',
+    '      transactions.ccdata::JSON->0->>\'type\' AS type',
+    '    FROM',
+    '      transactions',
+    '    ) AS transactions ON transactions.txid = outputs.txid) AS assetsoutputs',
+    'WHERE',
+    '  "assetId" = :assetId',
+    'GROUP BY',
+    '  "assetId"'
+  ].join('\n')
+  if (typeof utxo === 'function') {
+    callback = utxo
+    utxo = null
+  }
+
+  var replacements = {
+    assetId: assetId
+  }
+  if (utxo) {
+    var utxo_split = utxo.split(':')
+    replacements.txid = utxo_split[0]
+    replacements.n = utxo_split[1]
+  }
+  sequelize.query(find_asset_info_query, {replacements: replacements, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (asset_info) {
+      var holders = {}
+      asset_info = asset_info[0]
+      console.log(JSON.stringify(asset_info))
+      asset_info.holders.forEach(function (holder) {
+        holder.addresses.forEach(function (address) {
+          holders[address] = holders[address] || 0
+          holders[address] += holder.amount
+        })
+      })
+      asset_info.holders = Object.keys(holders).map(function (address) {
+        return {
+          address: address,
+          amount: holders[address]
+        }
+      })
+      asset_info.numOfHolders = asset_info.holders.length
+      callback(null, asset_info)
+    })
+    .catch(callback)
+}
+
 var find_utxo = function (txid, index, callback) {
   var where = {
     txid: txid,
@@ -620,6 +771,7 @@ module.exports = {
   get_blocks: get_blocks,
   get_address_utxos: get_address_utxos,
   get_addresses_utxos: get_addresses_utxos,
+  get_asset_info: get_asset_info,
   search: search,
   parse_tx: parse_tx,
   get_utxo: get_utxo,
