@@ -60,11 +60,6 @@ process.on('message', function (msg) {
 
 async.waterfall([
   function (callback) {
-    db.sequelize.sync()
-      .then(function (res) { callback(null, res)  })
-      .catch(callback)
-  },
-  function (res, callback) {
     if (process.env.ROLE === properties.roles.API) {
       global.mempool = false
       server.http_server.listen(server.port, function () {
@@ -106,7 +101,7 @@ async.waterfall([
   }
 ], function (err, result) {
   if (err) {
-    logger.info('Critical Error so killing server - ' + err)
+    logger.info('Critical Error so killing server - ', JSON.stringify(err))
     casimir.running = false
     return process.exit(1)
   }
