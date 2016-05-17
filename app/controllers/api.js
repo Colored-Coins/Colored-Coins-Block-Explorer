@@ -1,7 +1,10 @@
+var bitcoin = require('bitcoinjs-lib')
+var async = require('async')
+
 var casimir = global.casimir
 var properties = casimir.properties
 var db = casimir.db
-var async = require('async')
+var scanner = casimir.scanner
 var _ = require('lodash')
 
 var Sequelize = db.Sequelize
@@ -31,7 +34,8 @@ var get_transaction = function (req, res, next) {
 
   find_transactions([txid], function (err, transactions) {
     if (err) return next(err)
-    return res.send(transactions[0])
+    var transaction = (transactions.length && transactions[0]) || {}
+    return res.send(transaction)
   })
 }
 
@@ -206,6 +210,23 @@ var get_asset_holders = function (req, res, next) {
   })
 }
 
+var get_info = function (req, res, next) {
+  find_info(function (err, info) {
+    if (err) return next(err)
+    res.send(info)
+  })
+}
+
+var get_mempool_txids = function (req, res, next) {
+  var params = req.data
+  var colored = params.colored
+
+  find_mempool_txids(colored, function (err, txids) {
+    if (err) return next(err)
+    res.send(txids)
+  })
+}
+
 var get_utxo = function (req, res, next) {
   var params = req.data
   var txid = params.txid
@@ -253,7 +274,7 @@ var parse_tx = function (req, res, next) {
 var is_transaction = function (txid, callback) {
   console.log('is_transaction, txid = ', txid)
   Transactions.findById(txid, {raw: true})
-    .then(function (tx) { callback(!!tx) })
+    .then(function (tx) { callback(null, !!tx) })
     .catch(callback)
 }
 
@@ -299,7 +320,7 @@ var get_find_transaction_query = function (transactions_condition) {
     '        AS assets)) AS assets\n' +
     '      FROM\n' +
     '        inputs\n' +
-    '      INNER JOIN\n' +
+    '      LEFT OUTER JOIN\n' +
     '        (SELECT outputs.id, outputs."scriptPubKey"\n' +
     '         FROM outputs) AS "previousOutput" ON "previousOutput".id = inputs.output_id\n' +
     '      WHERE\n' +
@@ -332,12 +353,16 @@ var get_find_transaction_query = function (transactions_condition) {
 }
 
 var find_transactions = function (txids, callback) {
-  var find_transaction_query = get_find_transaction_query('txid IN ?', txids) + ';'
+  var find_transaction_query = get_find_transaction_query('txid IN ' + to_sql_values(txids)) + ';'
   console.log('find_transaction_query = ', find_transaction_query)
   sequelize.query(find_transaction_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (transactions) {
+      transactions.forEach(function (transaction) {
+        transaction.confirmations = properties.last_block - transaction.blockheight + 1
+      })
       callback(null, transactions)
     })
+    .catch(callback)
 }
 
 var find_block = function (height_or_hash, with_transactions, callback) {
@@ -347,11 +372,13 @@ var find_block = function (height_or_hash, with_transactions, callback) {
   } else {
     var height = parseInt(height_or_hash, 10)
     if (height) {
-      block_condition = 'height = ' + height_or_hash + ' AND ccparsed = TRUE'
+      block_condition = 'height = ' + height_or_hash
     } else {
       return callback()
     }
   }
+  block_condition += ' AND ccparsed = TRUE'
+
   var find_block_query = '' +
     'SELECT\n' +
     '  blocks.*,\n' +
@@ -520,7 +547,7 @@ var find_addresses_utxos = function (addresses, confirmations, callback) {
     }]
   }]
 
-  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true })
+  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: true, benchmark: true })
     .then(function (utxos) {
       _(utxos)
         .groupBy('address')
@@ -587,14 +614,14 @@ var find_blocks = function (start, end, callback) {
   if (start < 0 && !end) {
     limit = -start
     if (limit > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more then ' + MAX_BLOCKS_ALLOWED + ' blocks.')
+      return callback('Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.')
     }
     conditions = {
       ccparsed: true
     }
   } else {
     if (end - start + 1 > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more then ' + MAX_BLOCKS_ALLOWED + ' blocks.')
+      return callback('Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.')
     }
     conditions = {
       height: {$gte: start, $lte: end},
@@ -769,9 +796,94 @@ var find_utxos = function (utxos, callback) {
 }
 
 var is_asset = function (assetId, callback) {
-  AssetsTransactions.findOne({where: {assetId: assetId}, raw: true})
-    .then(function (asset_transaction) { callback(null, !!asset_transaction) })
+  Assets.findOne({where: {assetId: assetId}, raw: true})
+    .then(function (asset) { callback(null, !!asset) })
     .catch(callback)
+}
+
+var find_mempool_txids = function (colored, callback) {
+  var conditions = {
+    blockheight: -1
+  }
+  if (colored) {
+    conditions.colored = true
+  }
+  var attributes = ['txid']
+  Transactions.findAll({where: conditions, attributes: attributes, raw: true, logging: console.log, benchmark: true})
+    .then(function (transactions) {
+      callback(null, transactions.map(function (tx) { return tx.txid }))
+    })
+    .catch(callback)
+}
+
+var find_info = function (callback) {
+  scanner.get_info(function (err, info) {
+    if (err) return callback(err)
+    delete info.balance
+    info.mempool = global.mempool
+    find_last_blocks(function (err, blocks) {
+      if (err) return callback(err)
+      info.parsedblocks = blocks.last_parsed_block
+      info.fixedblocks = blocks.last_fixed_block
+      info.ccparsedblocks = blocks.last_cc_parsed_block
+      info.timeStamp = new Date()
+      callback(null, info)
+    })
+  })
+}
+
+var find_last_parsed_block = function (callback) {
+  var conditions = {
+    txsinserted: true
+  }
+  var attributes = ['height']
+  var order = [['height', 'DESC']]
+  Blocks.findOne({where: conditions, attributes: attributes, order: order, raw: true, logging: console.log, benchmark: true})
+    .then(function (block_data) {
+      if (!block_data) return callback(null, -1)
+      callback(null, block_data.height)
+    })
+    .catch(callback)
+}
+
+var find_last_fixed_block = function (callback) {
+  var conditions = {
+    txsinserted: true,
+    txsparsed: true
+  }
+  var attributes = ['height']
+  var order = [['height', 'DESC']]
+  Blocks.findOne({where: conditions, attributes: attributes, order: order, raw: true, logging: console.log, benchmark: true})
+    .then(function (block_data) {
+      if (!block_data) return callback(null, -1)
+      callback(null, block_data.height)
+    })
+    .catch(callback)
+}
+
+var find_last_cc_parsed_block = function (callback) {
+  var conditions = {
+    txsinserted: true,
+    txsparsed: true,
+    ccparsed: true
+  }
+  var attributes = ['height']
+  var order = [['height', 'DESC']]
+  Blocks.findOne({where: conditions, attributes: attributes, order: order, raw: true, logging: console.log, benchmark: true})
+    .then(function (block_data) {
+      if (!block_data) return callback(null, -1)
+      callback(null, block_data.height)
+    })
+    .catch(callback)
+}
+
+var find_last_blocks = function (callback) {
+  async.parallel({
+    last_parsed_block: find_last_parsed_block,
+    last_fixed_block: find_last_fixed_block,
+    last_cc_parsed_block: find_last_cc_parsed_block
+  },
+  callback)
 }
 
 var format_utxos = function (utxos) {
@@ -849,6 +961,8 @@ module.exports = {
   get_address_info_with_transactions: get_address_info_with_transactions,
   get_addresses_info: get_addresses_info,
   get_addresses_info_with_transactions: get_addresses_info_with_transactions,
+  get_mempool_txids: get_mempool_txids,
+  get_info: get_info,
   is_active: is_active,
   transmit: transmit
 }

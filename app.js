@@ -70,7 +70,6 @@ if (cluster.isMaster) {
     .then(function () {
       // Fork workers.
       scanner_worker = fork(properties.roles.SCANNER)
-      console.log('scanner_worker = ' + scanner_worker)
       fixer_worker = fork(properties.roles.FIXER)
       cc_parser = fork(properties.roles.CC_PARSER)
       // Register workers to the message bus
