@@ -88,7 +88,7 @@ async.waterfall([
       }
     }
     casimir.scanner = scanner = new Scanner(settings, db)
-    // if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
+    if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
     if (properties.scanner.scan === 'true' && properties.scanner.mempool_only !== 'true') {
       if (process.env.ROLE === properties.roles.SCANNER) scanner.scan_blocks()
       if (process.env.ROLE === properties.roles.FIXER) scanner.fix_blocks()

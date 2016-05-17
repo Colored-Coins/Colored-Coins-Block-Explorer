@@ -69,9 +69,10 @@ if (cluster.isMaster) {
   db.sequelize.sync()
     .then(function () {
       // Fork workers.
-      var scanner_worker = fork(properties.roles.SCANNER)
-      var fixer_worker = fork(properties.roles.FIXER)
-      var cc_parser = fork(properties.roles.CC_PARSER)
+      scanner_worker = fork(properties.roles.SCANNER)
+      console.log('scanner_worker = ' + scanner_worker)
+      fixer_worker = fork(properties.roles.FIXER)
+      cc_parser = fork(properties.roles.CC_PARSER)
       // Register workers to the message bus
       listen(scanner_worker)
       listen(fixer_worker)
