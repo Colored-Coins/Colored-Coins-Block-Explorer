@@ -271,6 +271,21 @@ var parse_tx = function (req, res, next) {
   console.timeEnd('priority_parse: api_to_parent ' + txid)
 }
 
+var get_cc_transactions = function (req, res, next) {
+  var params = req.data
+  var limit = params.limit || 10
+  limit = parseInt(limit, 10)
+  limit = Math.min(limit, 100)
+  var skip = params.skip || 0
+  skip = parseInt(skip, 10)
+
+  find_cc_transactions(skip, limit, function (err, transactions) {
+    if (err) return next(err)
+    res.send(transactions)
+  })
+}
+
+
 var is_transaction = function (txid, callback) {
   console.log('is_transaction, txid = ', txid)
   Transactions.findById(txid, {raw: true})
@@ -295,7 +310,7 @@ var to_sql_values = function (values) {
   }).join(', ') + ')'
 }
 
-var get_find_transaction_query = function (transactions_condition) {
+var get_find_transactions_query = function (transactions_condition) {
   return '' +
     'SELECT\n' +
     '  ' + to_sql_columns(Transactions, {exclude: ['index_in_block']}) + '\n' +
@@ -353,9 +368,9 @@ var get_find_transaction_query = function (transactions_condition) {
 }
 
 var find_transactions = function (txids, callback) {
-  var find_transaction_query = get_find_transaction_query('txid IN ' + to_sql_values(txids)) + ';'
-  console.log('find_transaction_query = ', find_transaction_query)
-  sequelize.query(find_transaction_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+  var find_transactions_query = get_find_transactions_query('txid IN ' + to_sql_values(txids)) + ';'
+  console.log('find_transactions_query = ', find_transactions_query)
+  sequelize.query(find_transactions_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (transactions) {
       transactions.forEach(function (transaction) {
         transaction.confirmations = properties.last_block - transaction.blockheight + 1
@@ -387,7 +402,7 @@ var find_block = function (height_or_hash, with_transactions, callback) {
     '    SELECT\n' +
     '      transactions\n' +
     '    FROM\n' +
-    '      (' + get_find_transaction_query('transactions.blockheight = blocks.height') + '\n' +
+    '      (' + get_find_transactions_query('transactions.blockheight = blocks.height') + '\n' +
     '    ORDER BY\n' +
     '      index_in_block) AS transactions)) AS transactions') : (
     '      SELECT\n' +
@@ -417,6 +432,79 @@ var find_block = function (height_or_hash, with_transactions, callback) {
       callback(null, block)
     })
     .catch(callback)
+}
+
+var find_cc_transactions = function (skip, limit, callback) {
+  limit = limit || 10
+  limit = parseInt(limit, 10)
+  limit = Math.min(limit, 5000)
+
+  skip = skip || 0
+  skip = parseInt(skip, 10)
+
+  var txs
+
+  async.waterfall([
+    function (cb) {
+      console.time('find_cc_transactions find_mempool_cc_txs_query')
+      var find_mempool_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE and blockheight = -1') + '\n' +
+        'ORDER BY\n' +
+        '  blocktime DESC\n' +
+        'LIMIT ' + limit + '\n' +
+        'OFFSET ' + skip
+      sequelize.query(find_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (cc_mempool_txs) { cb(null, cc_mempool_txs) })
+        .catch(cb)
+    },
+    function (cc_mempool_txs, cb) {
+      console.timeEnd('find_cc_transactions find_mempool_cc_txs_query')
+      console.time('find_cc_transactions count_mempool_cc_txs_query')
+      console.log('cc_mempool_txs = ', JSON.stringify(cc_mempool_txs))
+      txs = cc_mempool_txs
+      if (txs.length) {
+        limit -= txs.length
+        skip = 0
+        return cb()
+      }
+      var count_mempool_cc_txs_query = '' +
+        'SELECT COUNT(*)\n' +
+        'FROM\n' +
+        '  transactions\n' +
+        'WHERE\n' +
+        '  ccparsed = TRUE AND colored = TRUE and blockheight = -1'
+      sequelize.query(count_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (results) {
+          console.log('results = ', JSON.stringify(results))
+          var count = results[0].count
+          skip -= count
+          skip = Math.max(skip, 0)
+          cb()
+        })
+        .catch(cb)
+    },
+    function (cb) {
+      console.timeEnd('find_cc_transactions count_mempool_cc_txs_query')
+      console.time('find_cc_transactions find_latest_confirmed_cc_txs_query')
+      if (!limit) return cb()
+      var find_latest_confirmed_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE and blockheight > 0') + '\n' +
+        'ORDER BY\n' +
+        '  blockheight DESC\n' +
+        'LIMIT ' + limit + '\n' +
+        'OFFSET ' + skip
+
+      sequelize.query(find_latest_confirmed_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (conf_txs) {
+          console.log('cc_mempool_txs = ', JSON.stringify(conf_txs))
+          txs = txs.concat(conf_txs)
+          cb()
+        })
+        .catch(cb)
+    }
+  ], function (err) {
+    if (err) return callback(err)
+    console.timeEnd('find_cc_transactions find_latest_confirmed_cc_txs_query')
+    callback(null, txs)
+  })
 }
 
 var find_addresses_info = function (addresses, confirmations, callback) {
@@ -580,7 +668,7 @@ var find_address_utxos = function (address, confirmations, callback) {
     }]
   }]
 
-  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true })
+  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: true, benchmark: true })
     .then(function (utxos) {
       ans.utxos = format_utxos(utxos)
       callback(null, ans)
@@ -961,6 +1049,7 @@ module.exports = {
   get_address_info_with_transactions: get_address_info_with_transactions,
   get_addresses_info: get_addresses_info,
   get_addresses_info_with_transactions: get_addresses_info_with_transactions,
+  get_cc_transactions: get_cc_transactions,
   get_mempool_txids: get_mempool_txids,
   get_info: get_info,
   is_active: is_active,
