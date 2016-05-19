@@ -1,11 +1,17 @@
 var bitcoin = require('bitcoinjs-lib')
 var async = require('async')
+var moment = require('moment')
+var Cache = require('ttl')
 
 var casimir = global.casimir
 var properties = casimir.properties
 var db = casimir.db
 var scanner = casimir.scanner
 var _ = require('lodash')
+var cache = new Cache({
+  ttl: 10 * 1000, // 10 Seconds
+  capacity: 300
+})
 
 var Sequelize = db.Sequelize
 var sequelize = db.sequelize
@@ -269,6 +275,28 @@ var parse_tx = function (req, res, next) {
   console.time('priority_parse: api_to_parent ' + txid)
   process.send({to: properties.roles.SCANNER, parse_priority: txid})
   console.timeEnd('priority_parse: api_to_parent ' + txid)
+}
+
+var get_popular_assets = function (req, res, next) {
+  var cache_key = req.originalUrl
+  var ttl = 12 * 60 * 60 * 1000 // 12 hours
+  var assets = cache.get(cache_key)
+
+  if (assets) {
+    res.send(assets)
+  } else {
+    var params = req.data
+    var sort_by = params.sortBy
+    var limit = params.limit || 10
+    limit = parseInt(limit, 10)
+    limit = Math.min(limit, 100)
+
+    find_popular_assets(sort_by, limit, function (err, assets) {
+      if (err) return next(err)
+      cache.put(cache_key, assets, ttl)
+      res.send(assets)
+    })
+  }
 }
 
 var get_cc_transactions = function (req, res, next) {
@@ -815,14 +843,119 @@ var find_asset_holders = function (assetId, confirmations, callback) {
     })
 }
 
+var find_asset_info = function (assetId, options, callback) {
+  var utxo
+  var with_transactions
+  if (typeof options === 'function') {
+    callback = options
+    utxo = null
+    with_transactions = false
+  } else {
+    utxo = (options && options.utxo) || null
+    with_transactions = (options && options.with_transactions) === true
+  }
+
+  var find_asset_info_query = '' +
+    'SELECT\n' +
+    '  assetsoutputs."assetId",\n' +
+    (utxo ? '  min(CASE WHEN assetsoutputs.txid = :txid AND assetsoutputs.n = :n THEN assetsoutputs."issueTxid" ELSE NULL END) AS "issuanceTxid",\n' : '') +
+    '  min(assetsoutputs.blockheight) AS "firstBlock",\n' +
+    '  min(assetsoutputs.txid || \':\' || assetsoutputs.n) AS "someUtxo",\n' +
+    '  min(assetsoutputs.divisibility) AS divisibility,\n' +
+    '  min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",\n' +
+    '  bool_or(assetsoutputs."lockStatus") AS "lockStatus",\n' +
+    '  to_json(array_agg(holders) FILTER (WHERE used = false)) as holders,\n' +
+    (with_transactions ? 
+    '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'transfer\')) AS "transfers",\n' +
+    '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'issuance\')) AS "issuances",\n' :
+    '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'issuance\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfIssuance",\n' +
+    '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'transfer\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfTransfers",\n') +
+    '  sum(CASE WHEN assetsoutputs.used = false THEN assetsoutputs.amount ELSE NULL END) AS "totalSupply"\n' +
+    'FROM\n' +
+    '  (SELECT\n' +
+    '    assets.*,\n' +
+    '    assetsoutputs.amount,\n' +
+    '    assetsoutputs."issueTxid",\n' +
+    '    outputs.txid,\n' +
+    '    outputs.n,\n' +
+    '    outputs.used,\n' +
+    '    json_build_object(\'addresses\', outputs.addresses, \'amount\', amount) AS holders,\n' +
+    '    transactions.blockheight,\n' +
+    '    transactions.type\n' +
+    '  FROM\n' +
+    '    assets\n' +
+    '  LEFT OUTER JOIN (\n' +
+    '    SELECT\n' +
+    '      assetsoutputs.output_id,\n' +
+    '      assetsoutputs."issueTxid",\n' +
+    '      assetsoutputs.amount,\n' +
+    '      assetsoutputs."assetId"\n' +
+    '    FROM\n' +
+    '      assetsoutputs\n' +
+    '    ) AS assetsoutputs ON assetsoutputs."assetId" = assets."assetId"\n' +
+    '  INNER JOIN (\n' +
+    '      SELECT\n' +
+    '        outputs.id,\n' +
+    '        outputs.used,\n' +
+    '        outputs.txid,\n' +
+    '        outputs.n,\n' +
+    '        outputs."scriptPubKey"->\'addresses\' AS addresses\n' +
+    '      FROM\n' +
+    '        outputs\n' +
+    '    ) AS outputs ON outputs.id = assetsoutputs.output_id\n' +
+    '  INNER JOIN (\n' +
+    '    SELECT\n' +
+    '      transactions.txid,\n' +
+    '      transactions.blockheight,\n' +
+    '      transactions.ccdata::JSON->0->>\'type\' AS type\n' +
+    '    FROM\n' +
+    '      transactions\n' +
+    '    ) AS transactions ON transactions.txid = outputs.txid) AS assetsoutputs\n' +
+    'WHERE\n' +
+    '  "assetId" = :assetId\n' +
+    'GROUP BY\n' +
+    '  "assetId"'
+
+  var replacements = {
+    assetId: assetId,
+  }
+  if (utxo) {
+    var utxo_split = utxo.split(':')
+    replacements.txid = utxo_split[0]
+    replacements.n = utxo_split[1]
+  }
+
+  sequelize.query(find_asset_info_query, {replacements: replacements, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (asset_info) {
+      var holders = {}
+      asset_info = asset_info[0]
+      if (with_transactions) {
+        asset_info.numOfIssuance = asset_info.issuances.length
+        asset_info.numOfTransfers = asset_info.transfers.length
+      }
+      asset_info.holders.forEach(function (holder) {
+        holder.addresses.forEach(function (address) {
+          holders[address] = holders[address] || 0
+          holders[address] += holder.amount
+        })
+      })
+      asset_info.holders = Object.keys(holders).map(function (address) {
+        return {
+          address: address,
+          amount: holders[address]
+        }
+      })
+      asset_info.numOfHolders = asset_info.holders.length
+      callback(null, asset_info)
+    })
+    .catch(callback)
+}
+
 var find_asset_info_with_transactions = function (assetId, options, callback) {
-  console.log('options = ', options)
   find_asset_info(assetId, options, function (err, asset_info) {
     if (err) return callback(err)
-    console.log('asset_info = ', asset_info)
     async.parallel([
       function (cb) {
-        console.log('before first')
         find_transactions(asset_info.issuances, cb)
       },
       function (cb) {
@@ -836,6 +969,43 @@ var find_asset_info_with_transactions = function (assetId, options, callback) {
       callback(null, asset_info)
     })
   })
+}
+
+var find_popular_assets = function (sort_by, limit, callback) {
+  var table_name
+  if (sort_by === 'transactions') {
+    table_name = 'assetstransactions'
+  } else if (sort_by === 'holders') {
+    table_name = 'assetsaddresses'
+  } else {
+    table_name = 'assetstransactions'
+  }
+
+  var query = '' + 
+    'SELECT' +
+    ' "assetId", count(*) AS count\n' +
+    'FROM\n' +
+    ' ' + table_name + '\n' +
+    'GROUP BY\n' +
+    ' "assetId"\n' +
+    'ORDER BY\n' +
+    ' count DESC\n' +
+    'LIMIT ' + limit
+
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (assets) {
+      async.map(assets, function (asset, cb) {
+        find_asset_info(asset.assetId, function (err, info) {
+          if (err) return cb(err)
+          if ('holders' in info) delete info['holders']
+          cb(null, info)  
+        })
+      },
+      function (err, results) {
+        callback(err, results)
+      })
+    })
+    .catch(callback)
 }
 
 var find_utxo = function (txid, index, callback) {
@@ -1050,6 +1220,7 @@ module.exports = {
   get_addresses_info: get_addresses_info,
   get_addresses_info_with_transactions: get_addresses_info_with_transactions,
   get_cc_transactions: get_cc_transactions,
+  get_popular_assets: get_popular_assets,
   get_mempool_txids: get_mempool_txids,
   get_info: get_info,
   is_active: is_active,
