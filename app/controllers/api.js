@@ -121,8 +121,9 @@ var get_address_info = function (req, res, next) {
   var confirmations = params.confirmations || 0
   confirmations = parseInt(confirmations, 10)
 
-  find_address_info(address, confirmations, function (err, info) {
+  find_addresses_info([address], confirmations, function (err, infos) {
     if (err) return next(err)
+    var info = infos[0]
     if ('transactions' in info) delete info['transactions']
     if ('utxos' in info) delete info['utxos']
     return res.send(info)
@@ -135,8 +136,9 @@ var get_address_info_with_transactions = function (req, res, next) {
   var confirmations = params.confirmations || 0
   confirmations = parseInt(confirmations, 10)
 
-  find_address_info(address, confirmations, function (err, info) {
+  find_addresses_info([address], confirmations, function (err, infos) {
     if (err) return next(err)
+    var info = infos[0]
     return res.send(info)
   })
 }
@@ -329,7 +331,7 @@ var to_sql_columns = function (model, options) {
       columns.push(table_name + '."' + attribute + '"')
     }
   })
-  return columns.join(', ') + (options.last ? '' : ',')
+  return columns.join(', ')
 }
 
 var to_sql_values = function (values) {
@@ -341,20 +343,20 @@ var to_sql_values = function (values) {
 var get_find_transactions_query = function (transactions_condition) {
   return '' +
     'SELECT\n' +
-    '  ' + to_sql_columns(Transactions, {exclude: ['index_in_block']}) + '\n' +
+    '  ' + to_sql_columns(Transactions, {exclude: ['index_in_block']}) + ',\n' +
     '  to_json(array(\n' +
     '    SELECT\n' +
     '      vin\n' +
     '    FROM\n' +
     '      (SELECT\n' +
-    '       ' + to_sql_columns(Inputs, {exclude: ['input_index', 'input_txid', 'output_id']}) + '\n' +
+    '       ' + to_sql_columns(Inputs, {exclude: ['input_index', 'input_txid', 'output_id']}) + ',\n' +
     '       "previousOutput"."scriptPubKey" AS "previousOutput",\n' +
     '       to_json(array(\n' +
     '          SELECT\n' +
     '            assets\n' +
     '          FROM\n' +
     '            (SELECT\n' +
-    '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + '\n' +
+    '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
     '              assets.*\n' +
     '            FROM\n' +
     '              assetsoutputs\n' +
@@ -374,11 +376,11 @@ var get_find_transactions_query = function (transactions_condition) {
     '      vout\n' +
     '    FROM\n' +
     '      (SELECT\n' +
-    '        ' + to_sql_columns(Outputs, {exclude: ['id', 'txid']}) + '\n' +
+    '        ' + to_sql_columns(Outputs, {exclude: ['id', 'txid']}) + ',\n' +
     '        to_json(array(\n' +
     '         SELECT assets FROM\n' +
     '           (SELECT\n' +
-    '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + '\n' +
+    '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
     '              assets.*\n' +
     '            FROM\n' +
     '              assetsoutputs\n' +
@@ -536,109 +538,82 @@ var find_cc_transactions = function (skip, limit, callback) {
 }
 
 var find_addresses_info = function (addresses, confirmations, callback) {
-  var ans = []
-  async.each(addresses, function (address, cb) {
-    find_address_info(address, confirmations, function (err, address_info) {
-      if (err) return cb(err)
-      ans.push(address_info)
-      cb()
-    })
-  },
-  function (err) {
-    return callback(err, ans)
-  })
-}
+  var transactions_conditions = !confirmations ? '1 = 1' : 'blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1)
 
-var find_address_info = function (address, confirmations, callback) {
-  var ans = {
-    address: address
-  }
-  var transactions = ans.transactions = []
-  var utxos = ans.utxos = []
-  var assets = assets = {}
-  ans.balance = 0
-  ans.received = 0
+  var find_addresses_info_query = '' +
+    'SELECT\n' +
+    '  addressestransactions.address,\n' +
+    '  to_json(array_agg(transactions.*)) AS transactions\n' +
+    'FROM addressestransactions\n' +
+    'LEFT OUTER JOIN\n' +
+    '(' +get_find_transactions_query(transactions_conditions) + ') AS transactions ON transactions.txid = addressestransactions.txid\n' +
+    'WHERE\n' +
+    '  address IN ' + to_sql_values(addresses) + '\n' +
+    'GROUP BY\n' +
+    '   address;'
 
-  var where = {
-    address: address, 
-  }
-  var include = [
-    {
-      model: Transactions,
-      attributes: transactionAttributes,
-      as: 'transaction',
-      where: !confirmations ? null : {
-        blockheight: { $gte: 0, $lte: properties.last_block - confirmations + 1 }
-      },
-      include: [
-        { model: Inputs, as: 'vin', attributes: inputAttributes, include: [
-          { model: Outputs, as: 'previousOutput', attributes: outputAttributes }
-        ]}, // TODO Oded - include assets
-        { model: Outputs, as: 'vout', attributes: outputAttributes }        
-      ],
-      order: [
-        [{model: Inputs, as: 'vin'}, 'input_index', 'ASC'],
-        [{model: Outputs, as: 'vout'}, 'n', 'ASC']
-      ]
-    }
-  ]
-
-  AddressesTransactions.findAll({ where: where, include: include })
-    .then(function (address_transactions) {
-      var txs = address_transactions.map(function (address_transaction) { return address_transaction.toJSON().transaction })
-      txs.forEach(function (tx) {
-        if ('vout' in tx && tx.vout) {
-          tx.vout.forEach(function (vout) {
-            if ('scriptPubKey' in vout && vout.scriptPubKey) {
-              if ('addresses' in vout.scriptPubKey && vout.scriptPubKey.addresses && vout.scriptPubKey.addresses.indexOf(address) !== -1) {
-                ans.received += vout.value
-                if (!vout.used) {
-                  vout.blockheight = tx.blockheight
-                  vout.blocktime = tx.blocktime
-                  utxos.push(vout)
-                }
-                if (vout.assets && vout.assets.length) {
-                  vout.assets.forEach(function (asset) {
-                    var assetId = asset.assetId
-                    assets[assetId] = assets[assetId] || {
-                      assetId: assetId,
-                      balance: 0,
-                      received: 0,
-                      divisibility: asset.divisibility,
-                      lockStatus: asset.lockStatus
-                    }
-                    assets[assetId].received += asset.amount
-                  })
+  sequelize.query(find_addresses_info_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (addresses_info) {
+      if (!addresses_info || !addresses_info.length) return callback()
+      addresses_info.forEach(function (address_info) {
+        var utxos = address_info.utxos = []
+        var assets = {}
+        address_info.balance = 0
+        address_info.received = 0
+        address_info.transactions.forEach(function (tx) {
+          tx.confirmations = properties.last_block - confirmations + 1
+          if ('vout' in tx && tx.vout) {
+            tx.vout.forEach(function (vout) {
+              if ('scriptPubKey' in vout && vout.scriptPubKey) {
+                if ('addresses' in vout.scriptPubKey && vout.scriptPubKey.addresses && vout.scriptPubKey.addresses.indexOf(address_info.address) !== -1) {
+                  address_info.received += vout.value
+                  if (!vout.used) {
+                    vout.blockheight = tx.blockheight
+                    vout.blocktime = tx.blocktime
+                    utxos.push(vout)
+                  }
+                  if (vout.assets && vout.assets.length) {
+                    vout.assets.forEach(function (asset) {
+                      var assetId = asset.assetId
+                      assets[assetId] = assets[assetId] || {
+                        assetId: assetId,
+                        balance: 0,
+                        received: 0,
+                        divisibility: asset.divisibility,
+                        lockStatus: asset.lockStatus
+                      }
+                      assets[assetId].received += asset.amount
+                    })
+                  }
                 }
               }
-            }
-          })
-        }
-      })
-
-      utxos.forEach(function (utxo) {
-        ans.balance += utxo.value
-        utxo.assets = utxo.assets || []
-        utxo.assets.forEach(function (asset) {
-          var assetId = asset.assetId
-          assets[assetId] = assets[assetId] || {
-            assetId: assetId,
-            balance: 0,
-            received: 0,
-            divisibility: asset.divisibility,
-            lockStatus: asset.lockStatus
+            })
           }
-          assets[assetId].balance += asset.amount
         })
-      })
 
-      ans.transactions = txs
-      ans.assets = []
-      for (var assetId in assets) {
-        ans.assets.push(assets[assetId])
-      }
-      ans.numOfTransactions = ans.transactions.length
-      callback(null, ans)
+        utxos.forEach(function (utxo) {
+          address_info.balance += utxo.value
+          utxo.assets = utxo.assets || []
+          utxo.assets.forEach(function (asset) {
+            var assetId = asset.assetId
+            assets[assetId] = assets[assetId] || {
+              assetId: assetId,
+              balance: 0,
+              received: 0,
+              divisibility: asset.divisibility,
+              lockStatus: asset.lockStatus
+            }
+            assets[assetId].balance += asset.amount
+          })
+        })
+
+        address_info.assets = []
+        for (var assetId in assets) {
+          address_info.assets.push(assets[assetId])
+        }
+        address_info.numOfTransactions = address_info.transactions.length
+      })
+      callback(null, addresses_info)
     })
     .catch(callback)
 }
