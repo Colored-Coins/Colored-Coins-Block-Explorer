@@ -12,6 +12,7 @@
     "cc-block-parser": "git+https://github.com/Colored-Coins/Parser.git#sql",
     "sequelize": "^3.19.3",
     "squel": "^5.0.3",
+    "nodejs-sql": "git+https://github.com/oleiba/nodejs-sql.git",
     "coinstring": "^2.3.0",
     "commander": "^2.9.0",
     "ecdsa": "^0.6.0",

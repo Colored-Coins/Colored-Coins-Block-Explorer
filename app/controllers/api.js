@@ -31,6 +31,7 @@ var inputAttributes = {exclude: ['output_id', 'input_txid', 'input_index']}
 var outputAttributes = {exclude: ['id', 'txid']}
 
 var squel = require('squel').useFlavour('postgres')
+var sql_builder = require('nodejs-sql')
 
 var MAX_BLOCKS_ALLOWED = 50
 
@@ -323,40 +324,23 @@ var is_transaction = function (txid, callback) {
     .catch(callback)
 }
 
-var to_sql_columns = function (model, options) {
-  var columns = []
-  var table_name = model.getTableName()
-  Object.keys(model.attributes).forEach(function (attribute) {
-    if (!options || !options.exclude || options.exclude.indexOf(attribute) === -1) {
-      columns.push(table_name + '."' + attribute + '"')
-    }
-  })
-  return columns.join(', ')
-}
-
-var to_sql_values = function (values) {
-  return '(' + values.map(function (value) {
-    return '\'' + value + '\'' 
-  }).join(', ') + ')'
-}
-
 var get_find_transactions_query = function (transactions_condition) {
   return '' +
     'SELECT\n' +
-    '  ' + to_sql_columns(Transactions, {exclude: ['index_in_block']}) + ',\n' +
+    '  ' + sql_builder.to_columns_of_model(Transactions, {exclude: ['index_in_block']}) + ',\n' +
     '  to_json(array(\n' +
     '    SELECT\n' +
     '      vin\n' +
     '    FROM\n' +
     '      (SELECT\n' +
-    '       ' + to_sql_columns(Inputs, {exclude: ['input_index', 'input_txid', 'output_id']}) + ',\n' +
+    '       ' + sql_builder.to_columns_of_model(Inputs, {exclude: ['input_index', 'input_txid', 'output_id']}) + ',\n' +
     '       "previousOutput"."scriptPubKey" AS "previousOutput",\n' +
     '       to_json(array(\n' +
     '          SELECT\n' +
     '            assets\n' +
     '          FROM\n' +
     '            (SELECT\n' +
-    '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
+    '              ' + sql_builder.to_columns_of_model(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
     '              assets.*\n' +
     '            FROM\n' +
     '              assetsoutputs\n' +
@@ -376,11 +360,11 @@ var get_find_transactions_query = function (transactions_condition) {
     '      vout\n' +
     '    FROM\n' +
     '      (SELECT\n' +
-    '        ' + to_sql_columns(Outputs, {exclude: ['id', 'txid']}) + ',\n' +
+    '        ' + sql_builder.to_columns_of_model(Outputs, {exclude: ['id', 'txid']}) + ',\n' +
     '        to_json(array(\n' +
     '         SELECT assets FROM\n' +
     '           (SELECT\n' +
-    '              ' + to_sql_columns(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
+    '              ' + sql_builder.to_columns_of_model(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
     '              assets.*\n' +
     '            FROM\n' +
     '              assetsoutputs\n' +
@@ -398,7 +382,7 @@ var get_find_transactions_query = function (transactions_condition) {
 }
 
 var find_transactions = function (txids, callback) {
-  var find_transactions_query = get_find_transactions_query('txid IN ' + to_sql_values(txids)) + ';'
+  var find_transactions_query = get_find_transactions_query('txid IN ' + sql_builder.to_values(txids)) + ';'
   console.log('find_transactions_query = ', find_transactions_query)
   sequelize.query(find_transactions_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (transactions) {
@@ -548,7 +532,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
     'LEFT OUTER JOIN\n' +
     '(' +get_find_transactions_query(transactions_conditions) + ') AS transactions ON transactions.txid = addressestransactions.txid\n' +
     'WHERE\n' +
-    '  address IN ' + to_sql_values(addresses) + '\n' +
+    '  address IN ' + sql_builder.to_values(addresses) + '\n' +
     'GROUP BY\n' +
     '   address;'
 
@@ -902,8 +886,16 @@ var find_asset_info = function (assetId, options, callback) {
 
   sequelize.query(find_asset_info_query, {replacements: replacements, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (asset_info) {
-      var holders = {}
+      if (!asset_info || !asset_info.length) return callback(null, {
+          assetId: assetId,
+          totalSupply: 0,
+          numOfHolders: 0,
+          numOfTransfers: 0,
+          numOfIssuance: 0,
+          firstBlock: -1
+      })
       asset_info = asset_info[0]
+      var holders = {}
       if (with_transactions) {
         asset_info.numOfIssuance = asset_info.issuances.length
         asset_info.numOfTransfers = asset_info.transfers.length
@@ -929,6 +921,7 @@ var find_asset_info = function (assetId, options, callback) {
 var find_asset_info_with_transactions = function (assetId, options, callback) {
   find_asset_info(assetId, options, function (err, asset_info) {
     if (err) return callback(err)
+    if (!asset_info) return callback()
     async.parallel([
       function (cb) {
         find_transactions(asset_info.issuances, cb)
@@ -1149,7 +1142,7 @@ var is_active = function (req, res, next) {
     '  FROM\n' +
     '    addressestransactions\n' +
     '  WHERE\n' +
-    '    address IN ' + to_sql_values(addresses) + '\n' +
+    '    address IN ' + sql_builder.to_values(addresses) + '\n' +
     '  GROUP BY\n' +
     '    addressestransactions.address) AS addresses;'
   sequelize.query(is_active_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
