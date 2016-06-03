@@ -242,15 +242,19 @@ var find_address_info = function (address, confirmations, callback) {
 
 var find_addresses_utxos = function (addresses, confirmations, callback) {
   var ans = []
+  console.time('find_addresses_utxos - each')
   async.each(addresses, function (address, cb) {
+    console.time('find_addresses_utxos - address ' + address)
     find_address_utxos(address, confirmations, function (err, utxos) {
       if (err) return cb(err)
+      console.timeEnd('find_addresses_utxos - address ' + address)
       // ans.push({address: address, utxos: utxos}) //TODO: change to this in V2
       ans.push(utxos)
       cb()
     })
   },
   function (err) {
+    console.time('find_addresses_utxos - each')
     return callback(err, ans)
   })
 }
@@ -263,9 +267,12 @@ var find_address_utxos = function (address, confirmations, callback) {
 
   async.waterfall([
      function (cb) {
+      console.time('find_address_utxos #1 - address ' + address)
       AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_utxos, cb) {
+      console.timeEnd('find_address_utxos #1 - address ' + address)
+      console.time('find_address_utxos #2 - address ' + address)
       if (!address_utxos.length) return cb(null, [])
       var conditions = []
       address_utxos.forEach(function (address_utxo) {
@@ -285,6 +292,7 @@ var find_address_utxos = function (address, confirmations, callback) {
       Utxos.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (unspents, cb) {
+      console.timeEnd('find_address_utxos #2 - address ' + address)
       unspents.forEach(function (tx) {
         tx.assets = tx.assets || []
         if (utxos.indexOf(tx) === -1) {
@@ -1160,7 +1168,9 @@ var get_addresses_utxos = function (req, res, next) {
   var confirmations = params.confirmations || 0
   confirmations = parseInt(confirmations, 10)
 
+  console.time('get_address_utxos')
   find_addresses_utxos(addresses, confirmations, function (err, utxos) {
+    console.timeEnd('get_address_utxos')
     if (err) return next(err)
     return res.send(utxos)
   })

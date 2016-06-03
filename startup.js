@@ -64,6 +64,7 @@ async.waterfall([
     db.init(properties.db, mongoose, callback)
   },
   function (mongoose, callback) {
+    mongoose.set('debug', true)
     if (process.env.ROLE === properties.roles.API) {
       global.mempool = false
       server.http_server.listen(server.port, function () {
