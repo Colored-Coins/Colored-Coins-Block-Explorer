@@ -13,25 +13,20 @@ var cache = new Cache({
   capacity: 300
 })
 
-var Sequelize = db.Sequelize
 var sequelize = db.sequelize
 var Blocks = db.blocks
 var Transactions = db.transactions
 var Outputs = db.outputs
 var Inputs = db.inputs
 var AddressesOutputs = db.addressesoutputs
-var AddressesTransactions = db.addressestransactions
 var AssetsOutputs = db.assetsoutputs
-var AssetsTransactions = db.assetstransactions
-var AssetsAddresses = db.assetsaddresses
 var Assets = db.assets
 
-var transactionAttributes = {exclude: ['index_in_block']}
-var inputAttributes = {exclude: ['output_id', 'input_txid', 'input_index']}
-var outputAttributes = {exclude: ['id', 'txid']}
-
-var squel = require('squel').useFlavour('postgres')
-var sql_builder = require('nodejs-sql')
+var squel = require('squel')
+squel.cls.DefaultQueryBuilderOptions.autoQuoteFieldNames = true
+squel.cls.DefaultQueryBuilderOptions.nameQuoteCharacter = '"'
+squel.cls.DefaultQueryBuilderOptions.separator = '\n'
+var sql_builder = require('nodejs-sql')(squel)
 
 var MAX_BLOCKS_ALLOWED = 50
 
@@ -530,7 +525,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
     '  to_json(array_agg(transactions.*)) AS transactions\n' +
     'FROM addressestransactions\n' +
     'LEFT OUTER JOIN\n' +
-    '(' +get_find_transactions_query(transactions_conditions) + ') AS transactions ON transactions.txid = addressestransactions.txid\n' +
+    '(' + get_find_transactions_query(transactions_conditions) + ') AS transactions ON transactions.txid = addressestransactions.txid\n' +
     'WHERE\n' +
     '  address IN ' + sql_builder.to_values(addresses) + '\n' +
     'GROUP BY\n' +
@@ -610,7 +605,7 @@ var find_addresses_utxos = function (addresses, confirmations, callback) {
   var include = [{
     model: Outputs,
     as: 'output',
-    attributes: { exclude: ['n', 'id'], include: [['n', 'index']]},
+    attributes: {exclude: ['n', 'id'], include: [['n', 'index']]},
     where: { used: false },
     include: [{
       model: Transactions,
@@ -629,7 +624,8 @@ var find_addresses_utxos = function (addresses, confirmations, callback) {
         .mapKeys(function (utxos, address) { ans.push({ address: address, utxos: format_utxos(utxos) }) })
         .value()
       callback(null, ans)
-  })
+    })
+    .catch(callback)
 }
 
 var find_address_utxos = function (address, confirmations, callback) {
@@ -643,7 +639,7 @@ var find_address_utxos = function (address, confirmations, callback) {
   var include = [{
     model: Outputs,
     as: 'output',
-    attributes: { exclude: ['n', 'id'], include: [['n', 'index']]},
+    attributes: {exclude: ['n', 'id'], include: [['n', 'index']]},
     where: { used: false },
     include: [{
       model: Transactions,
@@ -659,11 +655,11 @@ var find_address_utxos = function (address, confirmations, callback) {
     .then(function (utxos) {
       ans.utxos = format_utxos(utxos)
       callback(null, ans)
-  })
+    })
+    .catch(callback)
 }
 
 var find_blocks = function (start, end, callback) {
-  var ans = []
   start = start || 0
   end = end || 0
 
@@ -710,19 +706,6 @@ var find_blocks = function (start, end, callback) {
         blocks[i].tx = _(blocks[i].transactions).map('txid').value()
         delete blocks[i].transactions
       })
-      // var last_height = -1
-      // blocks.forEach(function (block) {
-      //   var height = block.height
-      //   if (last_height !== height) {
-      //     ans.push(block)
-      //     ans[ans.length - 1].tx = [block['transactions.txid']]
-      //     ans[ans.length - 1].confirmations = properties.last_block - height + 1  // if performing raw query - need to calculate confirmations manually
-      //     delete ans.transactions
-      //   } else {
-      //     ans[ans.length - 1].tx.push(block['transactions.txid'])
-      //   }
-      //   last_height = height
-      // })
       callback(null, blocks)
     })
     .catch(callback)
@@ -766,7 +749,7 @@ var find_asset_holders = function (assetId, confirmations, callback) {
     '    WHERE\n' +
     '      outputs.used = FALSE\n' +
     '  ) AS outputs ON outputs.id = assetsoutputs.output_id\n' +
-    (confirmations ? 
+    (confirmations ?
     '  INNER JOIN (\n' +
     '    SELECT\n' +
     '      transactions.txid,\n' +
@@ -774,7 +757,7 @@ var find_asset_holders = function (assetId, confirmations, callback) {
     '    FROM\n' +
     '      transactions\n' +
     '    WHERE\n' +
-    '      blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1) +'\n' +
+    '      blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1) + '\n' +
     '  ) AS transactions ON transactions.txid = outputs.txid\n' : '') +
     'WHERE\n' +
     '  assets."assetId" = :assetId) AS assetsoutputs\n' +
@@ -824,7 +807,7 @@ var find_asset_info = function (assetId, options, callback) {
     '  min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",\n' +
     '  bool_or(assetsoutputs."lockStatus") AS "lockStatus",\n' +
     '  to_json(array_agg(holders) FILTER (WHERE used = false)) as holders,\n' +
-    (with_transactions ? 
+    (with_transactions ?
     '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'transfer\')) AS "transfers",\n' +
     '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'issuance\')) AS "issuances",\n' :
     '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'issuance\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfIssuance",\n' +
@@ -876,7 +859,7 @@ var find_asset_info = function (assetId, options, callback) {
     '  "assetId"'
 
   var replacements = {
-    assetId: assetId,
+    assetId: assetId
   }
   if (utxo) {
     var utxo_split = utxo.split(':')
@@ -949,7 +932,7 @@ var find_popular_assets = function (sort_by, limit, callback) {
     table_name = 'assetstransactions'
   }
 
-  var query = '' + 
+  var query = '' +
     'SELECT' +
     ' "assetId", count(*) AS count\n' +
     'FROM\n' +
@@ -966,7 +949,7 @@ var find_popular_assets = function (sort_by, limit, callback) {
         find_asset_info(asset.assetId, function (err, info) {
           if (err) return cb(err)
           if ('holders' in info) delete info['holders']
-          cb(null, info)  
+          cb(null, info) 
         })
       },
       function (err, results) {
@@ -1014,7 +997,7 @@ var find_utxos = function (utxos, callback) {
     as: 'transaction',
     attributes: ['blockheight', 'blocktime']
   }]
-  Outputs.findAll({ where: where, attributes: attributes, include: include, raw: true})
+  Outputs.findAll({where: where, attributes: attributes, include: include, raw: true})
     .then(function (utxos) {
       callback(null, format_utxos(utxos))
     })
