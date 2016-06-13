@@ -108,7 +108,7 @@ var get_block_with_transactions = function (req, res, next) {
   find_block(height_or_hash, true, function (err, block) {
     if (err) return next(err)
     return res.send(block)
-  }) 
+  })
 }
 
 var get_address_info = function (req, res, next) {
@@ -235,7 +235,7 @@ var get_utxo = function (req, res, next) {
   var params = req.data
   var txid = params.txid
   var index = params.index
-  
+
   find_utxo(txid, index, function (err, utxo) {
     if (err) return next(err)
     utxo = utxo || null
@@ -311,6 +311,35 @@ var get_cc_transactions = function (req, res, next) {
   })
 }
 
+var get_transactions_by_intervals = function (req, res, next) {
+  var cache_key = req.originalUrl
+  var ttl = 12 * 60 * 60 * 1000 // 12 hours
+  var intervals = cache.get(cache_key)
+
+  if (intervals) {
+    res.send(intervals)
+  } else {
+    var params = req.data
+    var start = params.start
+    var end = params.end
+    var interval = params.interval
+    var assetId = params.assetId
+
+    try {
+      start = parseInt(start, 10)
+      end = parseInt(end, 10)
+      interval = parseInt(interval, 10)
+    } catch (e) {
+      return next(e)
+    }
+
+    find_transactions_by_intervals(assetId, start, end, interval, function (err, intervals) {
+      if (err) return next(err)
+      cache.put(cache_key, intervals, ttl)
+      return res.send(intervals)
+    })
+  }
+}
 
 var is_transaction = function (txid, callback) {
   console.log('is_transaction, txid = ', txid)
@@ -443,6 +472,41 @@ var find_block = function (height_or_hash, with_transactions, callback) {
     .catch(callback)
 }
 
+var find_transactions_by_intervals = function (assetId, start, end, interval, callback) {
+  console.time('find_transactions_by_intervals')
+  end = end || moment.utc().millisecond(999).seconds(59).minutes(59).hours(23).valueOf() + 1
+  start = start || end - 10 * 24 * 60 * 60 * 1000
+  interval = interval || (end - start) / 10
+
+  start = Math.round(start)
+  end = Math.round(end)
+  interval = Math.round(interval)
+
+  if (Math.round((end - start) / interval) > 1000) return callback(['Sample resolution too high.', 500])
+
+  var query = '' +
+    'SELECT\n' +
+    '  DIV(blocktime - :start, :interval) AS interval_index,\n' +
+    '  COUNT(transactions.txid) AS "txsSum"\n' +
+    'FROM transactions\n' +
+    'JOIN assetstransactions ON assetstransactions.txid = transactions.txid\n' +
+    'WHERE transactions.blocktime BETWEEN :start AND :end\n' +
+    'GROUP BY interval_index'
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {start: start, interval: interval, end: end}, logging: console.log, benchmark: true})
+    .then(function (counts) {
+      var ans = counts.map(function (count) {
+        var from = (count.interval_index * interval) + start
+        return {
+          txsSum: count.txsSum,
+          from: from,
+          untill: from + interval
+        }
+      })
+      callback(null, ans)
+    })
+    .catch(callback)
+}
+
 var find_cc_transactions = function (skip, limit, callback) {
   limit = limit || 10
   limit = parseInt(limit, 10)
@@ -540,7 +604,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
         address_info.balance = 0
         address_info.received = 0
         address_info.transactions.forEach(function (tx) {
-          tx.confirmations = properties.last_block - confirmations + 1
+          tx.confirmations = properties.last_block - tx.blockheight + 1
           if ('vout' in tx && tx.vout) {
             tx.vout.forEach(function (vout) {
               if ('scriptPubKey' in vout && vout.scriptPubKey) {
@@ -1162,6 +1226,7 @@ module.exports = {
   get_asset_info: get_asset_info,
   get_asset_info_with_transactions: get_asset_info_with_transactions,
   get_asset_holders: get_asset_holders,
+  get_transactions_by_intervals: get_transactions_by_intervals,
   search: search,
   parse_tx: parse_tx,
   get_utxo: get_utxo,
