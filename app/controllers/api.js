@@ -101,6 +101,22 @@ var get_block = function (req, res, next) {
   })
 }
 
+var get_main_stats = function (req, res, next) {
+  var cache_key = req.originalUrl
+  var ttl = 1 * 60 * 60 * 1000 // 1 hour
+  var main_stats = cache.get(cache_key)
+
+  if (main_stats) {
+    res.send(main_stats)
+  } else {
+    find_main_stats(function (err, main_stats) {
+      cache.put(cache_key, main_stats, ttl)
+      if (err) return next(err)
+      return res.send(main_stats)
+    })
+  }
+}
+
 var get_block_with_transactions = function (req, res, next) {
   var params = req.data
   var height_or_hash = params.height_or_hash
@@ -470,6 +486,43 @@ var find_block = function (height_or_hash, with_transactions, callback) {
       callback(null, block)
     })
     .catch(callback)
+}
+
+var find_main_stats = function (callback) {
+  var main_stats = {}
+  async.parallel([
+    function (cb) {
+      var query = '' +
+        'SELECT\n' +
+        '  COUNT(DISTINCT assetstransactions."assetId") AS "numOfAssets",\n' +
+        '  COUNT(DISTINCT assetstransactions.txid) AS "numOfCCTransactions"\n' +
+        'FROM\n' +
+        '  assetstransactions;'
+      sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (info) {
+          main_stats.numOfAssets = info[0].numOfAssets
+          main_stats.numOfCCTransactions = info[0].numOfCCTransactions
+          cb()
+        })
+        .catch(cb)
+    },
+    function (cb) {
+      var query = '' +
+        'SELECT\n' +
+        '  COUNT(DISTINCT assetsaddresses.address) AS "numOfHolders"\n' +
+        'FROM\n' +
+        '  assetsaddresses;'
+      sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (info) {
+          main_stats.numOfHolders = info[0].numOfHolders
+          cb()
+        })
+        .catch(cb)
+    }
+  ],
+  function (err) {
+    return callback(err, main_stats)
+  })
 }
 
 var find_transactions_by_intervals = function (assetId, start, end, interval, callback) {
@@ -1000,20 +1053,20 @@ var find_popular_assets = function (sort_by, limit, callback) {
     'SELECT' +
     ' "assetId", count(*) AS count\n' +
     'FROM\n' +
-    ' ' + table_name + '\n' +
+    ' :table_name\n' +
     'GROUP BY\n' +
     ' "assetId"\n' +
     'ORDER BY\n' +
     ' count DESC\n' +
-    'LIMIT ' + limit
+    'LIMIT :limit'
 
-  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+  sequelize.query(query, {replacements: {table_name: table_name, limit: limit}, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (assets) {
       async.map(assets, function (asset, cb) {
         find_asset_info(asset.assetId, function (err, info) {
           if (err) return cb(err)
           if ('holders' in info) delete info['holders']
-          cb(null, info) 
+          cb(null, info)
         })
       },
       function (err, results) {
@@ -1227,6 +1280,7 @@ module.exports = {
   get_asset_info_with_transactions: get_asset_info_with_transactions,
   get_asset_holders: get_asset_holders,
   get_transactions_by_intervals: get_transactions_by_intervals,
+  get_main_stats: get_main_stats,
   search: search,
   parse_tx: parse_tx,
   get_utxo: get_utxo,
