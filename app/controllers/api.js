@@ -359,7 +359,7 @@ var get_transactions_by_intervals = function (req, res, next) {
 
 var is_transaction = function (txid, callback) {
   console.log('is_transaction, txid = ', txid)
-  Transactions.findById(txid, {raw: true})
+  Transactions.findById(txid, {raw: true, logging: console.log, benchmark: true})
     .then(function (tx) { callback(null, !!tx) })
     .catch(callback)
 }
@@ -475,6 +475,7 @@ var find_block = function (height_or_hash, with_transactions, callback) {
   sequelize.query(find_block_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (blocks) {
       var block = blocks[0]
+      if (!block) return callback()
       var confirmations = properties.last_block - block.height + 1
       block.confirmations = confirmations
       if (with_transactions) {
