@@ -274,7 +274,7 @@ var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
   console.time('parse_tx: full_parse ' + txid)
-  scanner.priority_parse({txid: txid}, function (err) {
+  scanner.priority_parse(txid, function (err) {
     if (err) return next(err)
     console.timeEnd('parse_tx: full_parse ' + txid)
     res.send({txid: txid})
