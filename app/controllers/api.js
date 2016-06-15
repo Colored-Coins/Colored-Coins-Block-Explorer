@@ -273,22 +273,12 @@ var parse_tx = function (req, res, next) {
   console.log('parse_tx')
   var params = req.data
   var txid = params.txid || ''
-  var callback
   console.time('parse_tx: full_parse ' + txid)
-  callback = function (data) {
-    if (data.priority_parsed === txid) {
-      console.timeEnd('parse_tx: full_parse ' + txid)
-      process.removeListener('message', callback)
-      if (data.err) return next(data.err)
-      res.send({txid: txid})
-    }
-  }
-
-  process.on('message', callback)
-
-  console.time('priority_parse: api_to_parent ' + txid)
-  process.send({to: properties.roles.SCANNER, parse_priority: txid})
-  console.timeEnd('priority_parse: api_to_parent ' + txid)
+  scanner.priority_parse({txid: txid}, function (err) {
+    if (err) return next(err)
+    console.timeEnd('parse_tx: full_parse ' + txid)
+    res.send({txid: txid})
+  })
 }
 
 var get_popular_assets = function (req, res, next) {
@@ -735,7 +725,7 @@ var find_addresses_utxos = function (addresses, confirmations, callback) {
     }]
   }]
 
-  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: true, benchmark: true })
+  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: console.log, benchmark: true })
     .then(function (utxos) {
       _(utxos)
         .groupBy('address')
@@ -769,7 +759,7 @@ var find_address_utxos = function (address, confirmations, callback) {
     }]
   }]
 
-  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: true, benchmark: true })
+  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: console.log, benchmark: true })
     .then(function (utxos) {
       ans.utxos = format_utxos(utxos)
       callback(null, ans)
