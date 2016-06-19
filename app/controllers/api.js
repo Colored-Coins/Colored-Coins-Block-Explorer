@@ -270,7 +270,6 @@ var get_utxos = function (req, res, next) {
 }
 
 var parse_tx = function (req, res, next) {
-  console.log('parse_tx')
   var params = req.data
   var txid = params.txid || ''
   console.time('parse_tx: full_parse ' + txid)
@@ -897,7 +896,7 @@ var find_asset_info = function (assetId, options, callback) {
     'SELECT\n' +
     '  assetsoutputs."assetId",\n' +
     (utxo ? '  min(CASE WHEN assetsoutputs.txid = :txid AND assetsoutputs.n = :n THEN assetsoutputs."issueTxid" ELSE NULL END) AS "issuanceTxid",\n' : '') +
-    '  min(assetsoutputs.blockheight) AS "firstBlock",\n' +
+    '  min(CASE WHEN assetsoutputs.blockheight > -1 THEN assetsoutputs.blockheight ELSE NULL END) AS "firstBlock",\n' +
     '  min(assetsoutputs.txid || \':\' || assetsoutputs.n) AS "someUtxo",\n' +
     '  min(assetsoutputs.divisibility) AS divisibility,\n' +
     '  min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",\n' +
@@ -966,14 +965,15 @@ var find_asset_info = function (assetId, options, callback) {
   sequelize.query(find_asset_info_query, {replacements: replacements, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (asset_info) {
       if (!asset_info || !asset_info.length) return callback(null, {
-          assetId: assetId,
-          totalSupply: 0,
-          numOfHolders: 0,
-          numOfTransfers: 0,
-          numOfIssuance: 0,
-          firstBlock: -1
+        assetId: assetId,
+        totalSupply: 0,
+        numOfHolders: 0,
+        numOfTransfers: 0,
+        numOfIssuance: 0,
+        firstBlock: -1
       })
       asset_info = asset_info[0]
+      asset_info.firstBlock = asset_info.firstBlock || -1
       var holders = {}
       if (with_transactions) {
         asset_info.numOfIssuance = asset_info.issuances.length
