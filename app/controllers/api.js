@@ -705,64 +705,52 @@ var find_addresses_info = function (addresses, confirmations, callback) {
     .catch(callback)
 }
 
-var find_addresses_utxos = function (addresses, confirmations, callback) {
-  var ans = []
+var get_find_addresses_utxos_query = function (confirmations, addresses_condition) {
+  confirmations = confirmations || 0
+  return '' +
+    'SELECT\n' +
+    'addressesoutputs.address,\n' +
+    sql_builder.to_columns_of_model(Outputs, {exclude: ['id']}) + ',\n' +
+    'to_json(array(\n' +
+    '  SELECT assets FROM\n' +
+    '    (SELECT\n' +
+    '      assetsoutputs."assetId", assetsoutputs."amount", assetsoutputs."issueTxid",\n' +
+    '      assets.*\n' +
+    '    FROM\n' +
+    '      assetsoutputs\n' +
+    '    INNER JOIN assets ON assets."assetId" = assetsoutputs."assetId"\n' +
+    '    WHERE assetsoutputs.output_id = outputs.id ORDER BY index_in_output)\n' +
+    '    AS assets)) AS assets\n' +
+    'FROM\n' +
+    '  addressesoutputs\n' +
+    'LEFT OUTER JOIN outputs ON outputs.id = addressesoutputs.output_id\n' +
+    (confirmations ? 'INNER JOIN transactions ON transactions.txid = outputs.txid\n' : '') +
+    'WHERE outputs.used = FALSE AND ' + (confirmations ? '(transactions.blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1) + ') AND\n' : '') +
+    addresses_condition + ';'
+}
 
-  var where = { address: {$in: addresses} }
-  var attributes = ['address']
-  var include = [{
-    model: Outputs,
-    as: 'output',
-    attributes: {exclude: ['n', 'id'], include: [['n', 'index']]},
-    where: { used: false },
-    include: [{
-      model: Transactions,
-      as: 'transaction',
-      attributes: ['blockheight', 'blocktime'],
-      where: !confirmations ? null : {
-        blockheight: { $gte: 0, $lte: properties.last_block - confirmations + 1 }
-      }
-    }]
-  }]
-
-  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: console.log, benchmark: true })
+var find_address_utxos = function (address, confirmations, callback) {
+  var query = get_find_addresses_utxos_query(confirmations, 'addressesoutputs.address = :address')
+  console.log(query)
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {address: address}, logging: console.log, benchmark: true})
     .then(function (utxos) {
-      _(utxos)
-        .groupBy('address')
-        .mapKeys(function (utxos, address) { ans.push({ address: address, utxos: format_utxos(utxos) }) })
-        .value()
-      callback(null, ans)
+      var ans = {address: address, utxos: utxos}
+      return callback(null, ans)
     })
     .catch(callback)
 }
 
-var find_address_utxos = function (address, confirmations, callback) {
-  var ans = {
-    address: address
-  }
-  ans.utxos = []
-
-  var where = { address: address }
-  var attributes = ['address']
-  var include = [{
-    model: Outputs,
-    as: 'output',
-    attributes: {exclude: ['n', 'id'], include: [['n', 'index']]},
-    where: { used: false },
-    include: [{
-      model: Transactions,
-      as: 'transaction',
-      attributes: ['blockheight', 'blocktime'],
-      where: !confirmations ? null : {
-        blockheight: { $gte: 0, $lte: properties.last_block - confirmations + 1 }
-      }
-    }]
-  }]
-
-  AddressesOutputs.findAll({ where: where, attributes: attributes, include: include, raw: true, logging: console.log, benchmark: true })
+var find_addresses_utxos = function (addresses, confirmations, callback) {
+  var query = get_find_addresses_utxos_query(confirmations, 'addressesoutputs.address IN ' + sql_builder.to_values(addresses))
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (utxos) {
-      ans.utxos = format_utxos(utxos)
-      callback(null, ans)
+      var ans = _(utxos)
+        .groupBy('address')
+        .transform(function (result, utxos, address) {
+          result.push({address: address, utxos: utxos})
+        }, [])
+        .value()
+      return callback(null, ans)
     })
     .catch(callback)
 }

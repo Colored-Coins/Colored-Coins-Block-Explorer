@@ -29,13 +29,7 @@ var listen = function (worker) {
   worker.on('message', function (data) {
     switch (data.to) {
       case properties.roles.SCANNER:
-        if (data && data.parse_priority) {
-          console.time('priority_parse parent_to_scanner ' + data.parse_priority)
-        }
         scanner_worker.send(data)
-        if (data && data.parse_priority) {
-          console.timeEnd('priority_parse parent_to_scanner ' + data.parse_priority)
-        }
         break
       case properties.roles.FIXER:
         fixer_worker.send(data)
