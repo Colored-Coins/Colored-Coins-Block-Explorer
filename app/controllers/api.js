@@ -1213,24 +1213,22 @@ var is_active = function (req, res, next) {
   var addresses = params.addresses
   if (!addresses || !Array.isArray(addresses)) return next('addresses should be array')
   var is_active_query = '' +
-    'SELECT\n' +
-    '  to_json(array_agg(address)) AS addresses\n' +
+    'SELECT DISTINCT\n' +
+    '  addressestransactions.address\n' +
     'FROM\n' +
-    '  (SELECT\n' +
-    '    addressestransactions.address\n' +
-    '  FROM\n' +
-    '    addressestransactions\n' +
-    '  WHERE\n' +
-    '    address IN ' + sql_builder.to_values(addresses) + '\n' +
-    '  GROUP BY\n' +
-    '    addressestransactions.address) AS addresses;'
+    '  addressestransactions\n' +
+    'WHERE\n' +
+    '  address IN ' + sql_builder.to_values(addresses) + ';'
   sequelize.query(is_active_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (active_addresses) {
-      active_addresses = active_addresses[0].addresses
+      active_addresses = _.reduce(active_addresses, function (result, obj) {
+        result[obj.address] = true
+        return result
+      }, {})
       var ans = addresses.map(function (address) {
         return {
           address: address,
-          active: active_addresses.indexOf(address) > -1
+          active: active_addresses[address] || false
         }
       })
       res.send(ans)
