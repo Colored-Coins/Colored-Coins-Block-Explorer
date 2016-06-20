@@ -27,7 +27,7 @@ process.on('message', function (msg) {
       scanner.emit('newtransaction', msg.newtransaction)
     }
     if (msg.newcctransaction) {
-      console.log('startup.js: ' + process.env.ROLE + ' newcctransaction ', newcctransaction)
+      console.log('startup.js: ' + process.env.ROLE + ' newcctransaction ', msg.newcctransaction)
       scanner.emit('newcctransaction', msg.newcctransaction)
     }
     if (msg.revertedblock) {
