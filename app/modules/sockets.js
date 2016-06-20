@@ -23,10 +23,10 @@ Sockets.prototype.open_channels = function () {
         var msg = {}
         msg[channel] = data
         if (casimir.properties.sockets && casimir.properties.sockets.all_channels === 'true') {
-          if (channel === 'newcctransaction') {
-            console.log('sockets.js: ' + process.env.ROLE + ' newcctransaction ', msg)
-          }
           self.io.emit(channel, msg)
+        }
+        if (channel === 'newcctransaction') {
+          console.log('sockets.js: ' + process.env.ROLE + ' newcctransaction ', msg)
         }
         self.events.to(channel).emit(channel, msg)
       })
