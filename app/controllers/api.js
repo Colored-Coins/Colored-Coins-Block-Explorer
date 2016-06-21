@@ -534,7 +534,8 @@ var find_transactions_by_intervals = function (assetId, start, end, interval, ca
     'FROM transactions\n' +
     'JOIN assetstransactions ON assetstransactions.txid = transactions.txid\n' +
     'WHERE transactions.blocktime BETWEEN :start AND :end\n' +
-    'GROUP BY interval_index'
+    'GROUP BY interval_index\n' +
+    'ORDER BY interval_index'
   sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {start: start, interval: interval, end: end}, logging: console.log, benchmark: true})
     .then(function (counts) {
       var ans = counts.map(function (count) {
@@ -563,7 +564,7 @@ var find_cc_transactions = function (skip, limit, callback) {
   async.waterfall([
     function (cb) {
       console.time('find_cc_transactions find_mempool_cc_txs_query')
-      var find_mempool_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE and blockheight = -1') + '\n' +
+      var find_mempool_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE AND blockheight = -1') + '\n' +
         'ORDER BY\n' +
         '  blocktime DESC\n' +
         'LIMIT ' + limit + '\n' +
@@ -587,7 +588,7 @@ var find_cc_transactions = function (skip, limit, callback) {
         'FROM\n' +
         '  transactions\n' +
         'WHERE\n' +
-        '  ccparsed = TRUE AND colored = TRUE and blockheight = -1'
+        '  ccparsed = TRUE AND colored = TRUE AND blockheight = -1'
       sequelize.query(count_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
         .then(function (results) {
           console.log('results = ', JSON.stringify(results))
@@ -602,7 +603,7 @@ var find_cc_transactions = function (skip, limit, callback) {
       console.timeEnd('find_cc_transactions count_mempool_cc_txs_query')
       console.time('find_cc_transactions find_latest_confirmed_cc_txs_query')
       if (!limit) return cb()
-      var find_latest_confirmed_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE and blockheight > 0') + '\n' +
+      var find_latest_confirmed_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE AND blockheight > 0') + '\n' +
         'ORDER BY\n' +
         '  blockheight DESC\n' +
         'LIMIT ' + limit + '\n' +
@@ -1009,10 +1010,10 @@ var find_asset_info_with_transactions = function (assetId, options, callback) {
         find_transactions(asset_info.transfers, cb)
       }
     ],
-    function (err, issuances, transfers) {
+    function (err, results) {
       if (err) return callback(err)
-      asset_info.issuances = issuances
-      asset_info.transfers = transfers
+      asset_info.issuances = results[0]
+      asset_info.transfers = results[1]
       callback(null, asset_info)
     })
   })
