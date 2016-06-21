@@ -21,6 +21,7 @@ process.on('message', function (msg) {
   }
   if (scanner && process.env.ROLE === properties.roles.API) {
     if (msg.newblock) {
+      msg.newblock.confirmations = properties.last_block - msg.newblock.height + 1
       scanner.emit('newblock', msg.newblock)
     }
     if (msg.newtransaction) {
