@@ -1030,16 +1030,16 @@ var find_popular_assets = function (sort_by, limit, callback) {
 
   var query = '' +
     'SELECT' +
-    ' "assetId", count(*) AS count\n' +
+    '  "assetId", count(*) AS count\n' +
     'FROM\n' +
-    ' :table_name\n' +
+    '  ' + table_name + '\n' +
     'GROUP BY\n' +
-    ' "assetId"\n' +
+    '  "assetId"\n' +
     'ORDER BY\n' +
-    ' count DESC\n' +
+    '  count DESC\n' +
     'LIMIT :limit'
 
-  sequelize.query(query, {replacements: {table_name: table_name, limit: limit}, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+  sequelize.query(query, {replacements: {limit: limit}, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (assets) {
       async.map(assets, function (asset, cb) {
         find_asset_info(asset.assetId, function (err, info) {

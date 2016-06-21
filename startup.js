@@ -27,7 +27,6 @@ process.on('message', function (msg) {
       scanner.emit('newtransaction', msg.newtransaction)
     }
     if (msg.newcctransaction) {
-      console.log('startup.js: ' + process.env.ROLE + ' newcctransaction ', msg.newcctransaction)
       scanner.emit('newcctransaction', msg.newcctransaction)
     }
     if (msg.revertedblock) {
@@ -41,20 +40,6 @@ process.on('message', function (msg) {
     }
     if (msg.mempool) {
       global.mempool = true
-    }
-  }
-  if (scanner && process.env.ROLE === properties.roles.SCANNER) {
-    if (msg.parse_priority) {
-      console.log('priority_parse scanner got request '+ msg.parse_priority)
-      scanner.priority_parse(msg.parse_priority, function (err) {
-        console.time('priority_parse scanner_to_parent '+ msg.parse_priority)
-        process.send({
-          to: properties.roles.API,
-          priority_parsed: msg.parse_priority,
-          err: err
-        })
-        console.timeEnd('priority_parse scanner_to_parent '+ msg.parse_priority)
-      })
     }
   }
 })
