@@ -977,7 +977,7 @@ var find_asset_info = function (assetId, options, callback) {
       asset_info.firstBlock = asset_info.firstBlock || -1
       var holders = {}
       if (with_transactions) {
-        asset_info.numOfIssuance = asset_info.issuances.length
+        asset_info.numOfIssuances = asset_info.issuances.length
         asset_info.numOfTransfers = asset_info.transfers.length
       }
       asset_info.holders.forEach(function (holder) {
