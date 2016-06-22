@@ -710,7 +710,7 @@ var get_find_addresses_utxos_query = function (confirmations, addresses_conditio
   return '' +
     'SELECT\n' +
     'addressesoutputs.address,\n' +
-    'outputs."n" AS index, outputs."used", outputs."usedTxid", outputs."usedBlockheight", outputs."value", outputs."scriptPubKey",\n' +
+    'outputs."n" AS index, outputs."used", outputs.txid, outputs."usedTxid", outputs."usedBlockheight", outputs."value", outputs."scriptPubKey",\n' +
     'to_json(array(\n' +
     '  SELECT assets FROM\n' +
     '    (SELECT\n' +
