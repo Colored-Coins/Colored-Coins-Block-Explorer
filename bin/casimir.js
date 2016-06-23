@@ -42,8 +42,8 @@ var routes = {
 }
 
 // Framework modules
-
-var db = casimir_core.db
+properties.db.dir = __dirname + '/../' + properties.db.dir
+var db = casimir_core.sqldb(properties.db)
 
 var requestSettings = {
   secret: properties.JWT.jwtTokenSecret,

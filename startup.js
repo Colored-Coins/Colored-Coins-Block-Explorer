@@ -1,4 +1,3 @@
-var mongoose = require('mongoose')
 var async = require('async')
 
 var casimir = global.casimir
@@ -22,6 +21,7 @@ process.on('message', function (msg) {
   }
   if (scanner && process.env.ROLE === properties.roles.API) {
     if (msg.newblock) {
+      msg.newblock.confirmations = properties.last_block - msg.newblock.height + 1
       scanner.emit('newblock', msg.newblock)
     }
     if (msg.newtransaction) {
@@ -43,27 +43,10 @@ process.on('message', function (msg) {
       global.mempool = true
     }
   }
-  if (scanner && process.env.ROLE === properties.roles.SCANNER) {
-    if (msg.parse_priority) {
-      console.log('priority_parse scanner got request '+ msg.parse_priority)
-      scanner.priority_parse(msg.parse_priority, function (err) {
-        console.time('priority_parse scanner_to_parent '+ msg.parse_priority)
-        process.send({
-          to: properties.roles.API,
-          priority_parsed: msg.parse_priority,
-          err: err
-        })
-        console.timeEnd('priority_parse scanner_to_parent '+ msg.parse_priority)
-      })
-    }
-  }
 })
 
 async.waterfall([
   function (callback) {
-    db.init(properties.db, mongoose, callback)
-  },
-  function (mongoose, callback) {
     if (process.env.ROLE === properties.roles.API) {
       global.mempool = false
       server.http_server.listen(server.port, function () {
@@ -91,7 +74,7 @@ async.waterfall([
         timeout: parseInt(process.env.BITCOINTIMEOUT || properties.bitcoin_rpc.timeout, 10)
       }
     }
-    casimir.scanner = scanner = new Scanner(settings, mongoose)
+    casimir.scanner = scanner = new Scanner(settings, db)
     if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
     if (properties.scanner.scan === 'true' && properties.scanner.mempool_only !== 'true') {
       if (process.env.ROLE === properties.roles.SCANNER) scanner.scan_blocks()
@@ -105,7 +88,7 @@ async.waterfall([
   }
 ], function (err, result) {
   if (err) {
-    logger.info('Critical Error so killing server - ' + err)
+    logger.info('Critical Error so killing server - ', err)
     casimir.running = false
     return process.exit(1)
   }
