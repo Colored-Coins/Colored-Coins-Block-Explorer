@@ -36,7 +36,7 @@ var get_transaction = function (req, res, next) {
 
   find_transactions([txid], function (err, transactions) {
     if (err) return next(err)
-    var transaction = (transactions.length && transactions[0]) || {}
+    var transaction = transactions[0]
     return res.send(transaction)
   })
 }
@@ -591,7 +591,6 @@ var find_cc_transactions = function (skip, limit, callback) {
         '  ccparsed = TRUE AND colored = TRUE AND blockheight = -1'
       sequelize.query(count_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
         .then(function (results) {
-          console.log('results = ', JSON.stringify(results))
           var count = results[0].count
           skip -= count
           skip = Math.max(skip, 0)
@@ -641,12 +640,13 @@ var find_addresses_info = function (addresses, confirmations, callback) {
 
   sequelize.query(find_addresses_info_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (addresses_info) {
-      if (!addresses_info || !addresses_info.length) return callback()
+      var results = {}
       addresses_info.forEach(function (address_info) {
         var utxos = address_info.utxos = []
         var assets = {}
         address_info.balance = 0
         address_info.received = 0
+        results[address_info.address] = address_info
         address_info.transactions.forEach(function (tx) {
           tx.confirmations = properties.last_block - tx.blockheight + 1
           if ('vout' in tx && tx.vout) {
@@ -700,7 +700,18 @@ var find_addresses_info = function (addresses, confirmations, callback) {
         }
         address_info.numOfTransactions = address_info.transactions.length
       })
-      callback(null, addresses_info)
+
+      // filling missing addresses (not all addresses were necessarily in DB)
+      addresses.forEach(function (address) {
+        results[address] = results[address] || {
+          address: address,
+          balance: 0,
+          received: 0,
+          assets: [],
+          numOfTransactions: 0
+        }
+      })
+      callback(null, _.values(results))
     })
     .catch(callback)
 }
@@ -1197,11 +1208,12 @@ var format_utxos = function (utxos) {
 }
 
 var format_utxo = function (utxo) {
+  if (!utxo) return utxo
   var currUtxo = {}
   var key
   var trimmedKey
   for (key in utxo) {
-    trimmedKey = key.substring(key.lastIndexOf('.') + 1) 
+    trimmedKey = key.substring(key.lastIndexOf('.') + 1)
     if (trimmedKey === 'address') continue
     currUtxo[trimmedKey] = utxo[key]
   }
