@@ -10,7 +10,9 @@ properties.engine.static_folder = __dirname + '/../' + properties.engine.static_
 var log_settings = {
   env: properties.ENV.type,
   logentries_api_ley: properties.logentries.api_key,
-  log_dir: __dirname + '/../app/log'
+  log_dir: __dirname + '/../app/log',
+  logzio_token: properties.logzio.token,
+  logzio_type: properties.logzio.type
 }
 
 var logger = global.logger = casimir_core.logger(log_settings)
