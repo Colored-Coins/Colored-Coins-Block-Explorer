@@ -88,7 +88,7 @@ async.waterfall([
   }
 ], function (err, result) {
   if (err) {
-    logger.info('Critical Error so killing server - ', JSON.stringify(err))
+    logger.info('Critical Error so killing server - ', err)
     casimir.running = false
     return process.exit(1)
   }
