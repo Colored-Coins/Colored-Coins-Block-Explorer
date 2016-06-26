@@ -36,7 +36,7 @@ var get_transaction = function (req, res, next) {
 
   find_transactions([txid], function (err, transactions) {
     if (err) return next(err)
-    var transaction = (transactions.length && transactions[0]) || {}
+    var transaction = transactions[0]
     return res.send(transaction)
   })
 }
@@ -591,7 +591,6 @@ var find_cc_transactions = function (skip, limit, callback) {
         '  ccparsed = TRUE AND colored = TRUE AND blockheight = -1'
       sequelize.query(count_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
         .then(function (results) {
-          console.log('results = ', JSON.stringify(results))
           var count = results[0].count
           skip -= count
           skip = Math.max(skip, 0)
@@ -641,19 +640,28 @@ var find_addresses_info = function (addresses, confirmations, callback) {
 
   sequelize.query(find_addresses_info_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (addresses_info) {
-      if (!addresses_info || !addresses_info.length) return callback()
+      // first saving set of all input addresses (not all addresses necessarily exist in DB)
+      var results = _.reduce(addresses, function (result, address) {
+        result[address] = {
+          address: address,
+          balance: 0,
+          received: 0,
+          assets: [],
+          numOfTransactions: 0
+        }
+        return result
+      }, {})
       addresses_info.forEach(function (address_info) {
-        var utxos = address_info.utxos = []
+        var utxos = []
         var assets = {}
-        address_info.balance = 0
-        address_info.received = 0
+        var result_address_info = results[address_info.address]
         address_info.transactions.forEach(function (tx) {
           tx.confirmations = properties.last_block - tx.blockheight + 1
           if ('vout' in tx && tx.vout) {
             tx.vout.forEach(function (vout) {
               if ('scriptPubKey' in vout && vout.scriptPubKey) {
                 if ('addresses' in vout.scriptPubKey && vout.scriptPubKey.addresses && vout.scriptPubKey.addresses.indexOf(address_info.address) !== -1) {
-                  address_info.received += vout.value
+                  result_address_info.received += vout.value
                   if (!vout.used) {
                     vout.blockheight = tx.blockheight
                     vout.blocktime = tx.blocktime
@@ -679,7 +687,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
         })
 
         utxos.forEach(function (utxo) {
-          address_info.balance += utxo.value
+          result_address_info.balance += utxo.value
           utxo.assets = utxo.assets || []
           utxo.assets.forEach(function (asset) {
             var assetId = asset.assetId
@@ -694,13 +702,12 @@ var find_addresses_info = function (addresses, confirmations, callback) {
           })
         })
 
-        address_info.assets = []
         for (var assetId in assets) {
-          address_info.assets.push(assets[assetId])
+          result_address_info.assets.push(assets[assetId])
         }
-        address_info.numOfTransactions = address_info.transactions.length
+        result_address_info.numOfTransactions = address_info.transactions.length
       })
-      callback(null, addresses_info)
+      callback(null, _.values(results))
     })
     .catch(callback)
 }
@@ -1197,11 +1204,12 @@ var format_utxos = function (utxos) {
 }
 
 var format_utxo = function (utxo) {
+  if (!utxo) return utxo
   var currUtxo = {}
   var key
   var trimmedKey
   for (key in utxo) {
-    trimmedKey = key.substring(key.lastIndexOf('.') + 1) 
+    trimmedKey = key.substring(key.lastIndexOf('.') + 1)
     if (trimmedKey === 'address') continue
     currUtxo[trimmedKey] = utxo[key]
   }
