@@ -1067,23 +1067,36 @@ var find_popular_assets = function (sort_by, limit, callback) {
     .catch(callback)
 }
 
+var get_find_utxos_query = function (outputs_conditions) {
+  return '' +
+    'SELECT\n' +
+    '  outputs."n" AS index, outputs."used", outputs.txid, outputs."usedTxid", outputs."usedBlockheight", outputs."value", outputs."scriptPubKey",\n' +
+    '  transactions.blockheight, transactions.blocktime,\n' +
+    '  to_json(array(\n' +
+    '    SELECT\n' +
+    '      assets\n' +
+    '    FROM\n' +
+    '      (SELECT\n' +
+    '        assetsoutputs.output_id, assetsoutputs.amount, assetsoutputs."issueTxid",\n' +
+    '        assets.*\n' +
+    '      FROM\n' +
+    '        assetsoutputs\n' +
+    '      INNER JOIN assets ON assetsoutputs."assetId" = assets."assetId"\n' +
+    '      WHERE\n' +
+    '        assetsoutputs.output_id = outputs.id) AS assets)) AS assets\n' +
+    'FROM\n' +
+    '  outputs\n' +
+    'INNER JOIN transactions ON transactions.txid = outputs.txid\n' +
+    'WHERE\n' +
+    '  ' + outputs_conditions
+}
+
 var find_utxo = function (txid, index, callback) {
-  var where = {
-    txid: txid,
-    n: index
-  }
-  var attributes = {
-    exclude: ['n', 'id'],
-    include: [['n', 'index']]
-  }
-  var include = [{
-    model: Transactions,
-    as: 'transaction',
-    attributes: ['blockheight', 'blocktime']
-  }]
-  Outputs.findOne({ where: where, attributes: attributes, include: include, raw: true })
-    .then(function (utxo) {
-      callback(null, format_utxo(utxo))
+  var output_condition = 'outputs.txid = :txid AND outputs.n = :n'
+  var query = get_find_utxos_query(output_condition)
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {txid: txid, n: index}, logging: console.log, benchmark: true})
+    .then(function (utxos) {
+      callback(null, utxos[0])
     })
     .catch(callback)
 }
@@ -1091,23 +1104,13 @@ var find_utxo = function (txid, index, callback) {
 var find_utxos = function (utxos, callback) {
   if (!utxos || !utxos.length) return callback(null, [])
   var or = utxos.map(function (utxo) {
-    return {txid: utxo.txid, n: utxo.index}
+    return {'outputs.txid': utxo.txid, n: utxo.index}
   })
-  var where = {
-    $or: or
-  }
-  var attributes = {
-    exclude: ['n', 'id'],
-    include: [['n', 'index']]
-  }
-  var include = [{
-    model: Transactions,
-    as: 'transaction',
-    attributes: ['blockheight', 'blocktime']
-  }]
-  Outputs.findAll({where: where, attributes: attributes, include: include, raw: true})
+  var outputs_conditions = sql_builder.to_conditions(or)
+  var query = get_find_utxos_query(outputs_conditions)
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (utxos) {
-      callback(null, format_utxos(utxos))
+      callback(null, utxos)
     })
     .catch(callback)
 }
@@ -1201,24 +1204,6 @@ var find_last_blocks = function (callback) {
     last_cc_parsed_block: find_last_cc_parsed_block
   },
   callback)
-}
-
-var format_utxos = function (utxos) {
-  return utxos.map(format_utxo)
-}
-
-var format_utxo = function (utxo) {
-  if (!utxo) return utxo
-  var currUtxo = {}
-  var key
-  var trimmedKey
-  for (key in utxo) {
-    trimmedKey = key.substring(key.lastIndexOf('.') + 1)
-    if (trimmedKey === 'address') continue
-    currUtxo[trimmedKey] = utxo[key]
-  }
-  currUtxo.assets = currUtxo.assets || []
-  return currUtxo
 }
 
 var is_active = function (req, res, next) {
