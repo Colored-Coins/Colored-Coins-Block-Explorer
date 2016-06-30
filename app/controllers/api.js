@@ -462,6 +462,7 @@ var find_asset_holders = function (assetId, confirmations, callback) {
   var divisibility
   var lockStatus
   var some_utxo
+  var aggregationPolicy
   find_asset_utxos(assetId, confirmations, function (err, asset_utxos) {
     if (err) return callback(err)
     if (asset_utxos.utxos) {
