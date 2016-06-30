@@ -873,7 +873,10 @@ var find_asset_holders = function (assetId, confirmations, callback) {
   sequelize.query(find_asset_holders_query, {type: sequelize.QueryTypes.SELECT, replacements: {assetId: assetId}, logging: console.log, benchmark: true})
     .then(function (holders) {
       if (!holders.length) {
-        return callback(null, [])
+        return callback(null, {
+          assetId: assetId,
+          holders: []
+        })
       }
       var ans = {}
       ans.assetId = assetId
