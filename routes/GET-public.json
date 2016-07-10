@@ -133,11 +133,5 @@
   "/api/getinfo" : {
     "function_name": "api.get_info",
     "params": [ ]
-  },
-  "/api/test" : {
-    "function_name": "api.test",
-    "params": [
-      "address"
-    ]
   }
 }
