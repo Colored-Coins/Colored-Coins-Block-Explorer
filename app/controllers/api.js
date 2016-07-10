@@ -276,7 +276,7 @@ var parse_tx = function (req, res, next) {
   console.log('parse_tx: ' + ', request-id = ', requestId)
   function isTransactionRollbackError (err) {
     var errorCode = err && (err.code || (err.original && err.original.code))
-    return errorCode.length === 5 && errorCode.substring(0, 2) === '40'
+    return errorCode && errorCode.length === 5 && errorCode.substring(0, 2) === '40'
   }
   console.time('parse_tx: full_parse ' + txid + ', request-id = ', requestId)
   scanner.priority_parse(txid, function (err) {
