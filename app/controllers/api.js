@@ -272,20 +272,18 @@ var get_utxos = function (req, res, next) {
 var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
-  var requestId = req.headers['request-id']
-  console.log('parse_tx: ' + ', request-id = ' + requestId)
   function isTransactionRollbackError (err) {
     var errorCode = err && (err.code || (err.original && err.original.code))
-    return errorCode && errorCode.length === 5 && errorCode.substring(0, 2) === '40'
+    return errorCode && errorCode.length === 5 && errorCode.substring(0, 2) === '40' // PostgreSQL Transaction Rollback prefix
   }
-  console.time('parse_tx: full_parse ' + txid + ', request-id = ' + requestId)
+  console.time('parse_tx: full_parse ' + txid)
   scanner.priority_parse(txid, function (err) {
     if (isTransactionRollbackError(err)) {
-      console.log('parse_tx failed with transaction rollback error, retrying ' + txid + ', request-id = ' + requestId)
-      return parse_tx(req, res, next) // retry
+      console.log('parse_tx failed with transaction rollback error, retrying ' + txid)
+      return parse_tx(req, res, next)
     }
     if (err) return next(err)
-    console.timeEnd('parse_tx: full_parse ' + txid + ', request-id = ' + requestId)
+    console.timeEnd('parse_tx: full_parse ' + txid)
     res.send({txid: txid})
   })
 }
