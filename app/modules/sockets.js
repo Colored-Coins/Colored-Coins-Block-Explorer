@@ -23,9 +23,9 @@ Sockets.prototype.open_channels = function () {
         var msg = {}
         msg[channel] = data
         if (casimir.properties.sockets && casimir.properties.sockets.all_channels === 'true') {
-          self.io.emit(channel, msg)
+          self.io.local.emit(channel, msg)
         }
-        self.events.to(channel).emit(channel, msg)
+        self.events.to(channel).local.emit(channel, msg) // if the scanner is paralelize then the local flag should be false
       })
     })
   }
@@ -34,7 +34,7 @@ Sockets.prototype.open_channels = function () {
       txid: transaction.txid,
       transaction: transaction
     }
-    self.events.to('transaction/' + transaction.txid).emit('transaction', msg)
+    self.events.to('transaction/' + transaction.txid).local.emit('transaction', msg)
     var assets = []
     var addresses = []
     // logger.debug('txid:', transaction.txid)
@@ -84,7 +84,7 @@ Sockets.prototype.open_channels = function () {
         address: address,
         transaction: transaction
       }
-      self.events.to('address/' + address).emit('transaction', msg)
+      self.events.to('address/' + address).local.emit('transaction', msg)
     })
 
     assets.forEach(function (assetId) {
@@ -93,7 +93,7 @@ Sockets.prototype.open_channels = function () {
         assetId: assetId,
         transaction: transaction
       }
-      self.events.to('asset/' + assetId).emit('transaction', msg)
+      self.events.to('asset/' + assetId).local.emit('transaction', msg)
     })
   })
 }

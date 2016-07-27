@@ -7,6 +7,11 @@ properties.server.favicon = __dirname + '/../' + properties.server.favicon
 properties.engine.view_folder = __dirname + '/../' + properties.engine.view_folder
 properties.engine.static_folder = __dirname + '/../' + properties.engine.static_folder
 
+properties.redis = properties.redis || {}
+properties.redis.redis_port = process.env.REDISPORT || properties.redis.redis_port
+properties.redis.redis_host = process.env.REDISHOST || properties.redis.redis_host
+properties.redis.prefix = process.env.REDISPREFIX || properties.redis.prefix
+
 var log_settings = {
   env: properties.ENV.type,
   logentries_api_ley: properties.logentries.api_key,
