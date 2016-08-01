@@ -38,7 +38,7 @@ var router = function (req, res, next) {
     // when no version - redirect to /v0 (backward compatibility)
     var parsedUrl = url.parse(req.url)
     parsedUrl.pathname = '/v0' + parsedUrl.pathname
-    return res.redirect(url.format(parsedUrl))
+    return res.redirect(307, url.format(parsedUrl)) // will redirect using same method
   }
   casimir_router(req, res, next)
 }
