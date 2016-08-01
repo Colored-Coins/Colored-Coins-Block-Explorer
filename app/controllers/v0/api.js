@@ -1219,7 +1219,6 @@ var find_last_blocks = function (callback) {
 var is_active = function (req, res, next) {
   var params = req.data
   var addresses = params.addresses
-  if (!addresses || !Array.isArray(addresses)) return next('addresses should be array')
   var is_active_query = '' +
     'SELECT DISTINCT\n' +
     '  addressestransactions.address\n' +

@@ -54,6 +54,7 @@ validator.isCryptoAddress = function (address) {
 }
 
 validator.isCryptoAddresses = function (addresses) {
+  if (!Array.isArray(addresses)) return false
   for (var i = 0; i < addresses.length; i++) {
     if (!validator.isCryptoAddress(addresses[i])) {
       return false
