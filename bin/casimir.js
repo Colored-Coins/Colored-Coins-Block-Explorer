@@ -1,5 +1,5 @@
 var url = require('url')
-var errorHandler = require('cc-error-handler')
+var errorHandler = require('cc-errors').errorHandler
 var requestId = require('cc-request-id')
 var casimir_core = require('casimircore')()
 var properties = casimir_core.properties(__dirname + '/../config/')

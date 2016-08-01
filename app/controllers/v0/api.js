@@ -181,7 +181,6 @@ var get_address_utxos = function (req, res, next) {
 }
 
 var search = function (req, res, next) {
-  console.log('search')
   var params = req.data
   var arg = params.arg
 
@@ -356,7 +355,6 @@ var get_transactions_by_intervals = function (req, res, next) {
 }
 
 var is_transaction = function (txid, callback) {
-  console.log('is_transaction, txid = ', txid)
   Transactions.findById(txid, {raw: true, logging: console.log, benchmark: true})
     .then(function (tx) { callback(null, !!tx) })
     .catch(callback)
@@ -468,7 +466,6 @@ var find_block = function (height_or_hash, with_transactions, callback) {
     '  blocks\n' +
     'WHERE\n' +
     '  ' + block_condition
-  console.log(find_block_query)
   sequelize.query(find_block_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (blocks) {
       var block = blocks[0]
@@ -533,7 +530,7 @@ var find_transactions_by_intervals = function (assetId, start, end, interval, ca
   end = Math.round(end)
   interval = Math.round(interval)
 
-  if (Math.round((end - start) / interval) > 1000) return callback(['Sample resolution too high.', 500])
+  if (Math.round((end - start) / interval) > 1000) return callback(new errors.ResolutionTooHighError())
 
   var query = '' +
     'SELECT\n' +
@@ -584,7 +581,6 @@ var find_cc_transactions = function (skip, limit, callback) {
     function (cc_mempool_txs, cb) {
       console.timeEnd('find_cc_transactions find_mempool_cc_txs_query')
       console.time('find_cc_transactions count_mempool_cc_txs_query')
-      console.log('cc_mempool_txs = ', JSON.stringify(cc_mempool_txs))
       txs = cc_mempool_txs
       if (txs.length) {
         limit -= txs.length
@@ -618,7 +614,6 @@ var find_cc_transactions = function (skip, limit, callback) {
 
       sequelize.query(find_latest_confirmed_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
         .then(function (conf_txs) {
-          console.log('cc_mempool_txs = ', JSON.stringify(conf_txs))
           txs = txs.concat(conf_txs)
           cb()
         })
@@ -750,7 +745,6 @@ var get_find_addresses_utxos_query = function (confirmations, addresses_conditio
 
 var find_address_utxos = function (address, confirmations, callback) {
   var query = get_find_addresses_utxos_query(confirmations, 'addressesoutputs.address = :address')
-  console.log(query)
   sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {address: address}, logging: console.log, benchmark: true})
     .then(function (utxos) {
       var ans = {address: address, utxos: utxos}
@@ -800,14 +794,18 @@ var find_blocks = function (start, end, callback) {
   if (start < 0 && !end) {
     limit = -start
     if (limit > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.')
+      return callback(new errors.BlocksRangeTooHighError({
+        explanation: 'Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.'
+      }))
     }
     conditions = {
       ccparsed: true
     }
   } else {
     if (end - start + 1 > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.')
+      return callback(new errors.BlocksRangeTooHighError({
+        explanation: 'Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.'
+      }))
     }
     conditions = {
       height: {$gte: start, $lte: end},
@@ -1220,6 +1218,7 @@ var find_last_blocks = function (callback) {
 var is_active = function (req, res, next) {
   var params = req.data
   var addresses = params.addresses
+  if (!addresses || !Array.isArray(addresses)) return next('addresses should be array')
   var is_active_query = '' +
     'SELECT DISTINCT\n' +
     '  addressestransactions.address\n' +
