@@ -16,6 +16,7 @@
     "cc-error-handler": "0.0.4",
     "cc-errors": "0.0.4",
     "cc-request-id": "0.0.2",
+    "cc-block-parser": "^0.4.0",
     "coinstring": "^2.3.0",
     "commander": "^2.9.0",
     "ecdsa": "^0.6.0",
