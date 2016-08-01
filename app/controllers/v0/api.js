@@ -420,7 +420,6 @@ var get_find_transactions_query = function (transactions_condition) {
 
 var find_transactions = function (txids, callback) {
   var find_transactions_query = get_find_transactions_query('txid IN ' + sql_builder.to_values(txids)) + ';'
-  console.log('find_transactions_query = ', find_transactions_query)
   sequelize.query(find_transactions_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (transactions) {
       transactions.forEach(function (transaction) {
