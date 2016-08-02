@@ -119,7 +119,7 @@ validator.isUtxos = function (utxos) {
 }
 
 var isV0 = function (url) {
-  return url.substring(0, '/v0'.length) === '/v0' || !url.match(/\/v\d\//)
+  return !url.match(/\/v\d\//)
 }
 
 module.exports = function (req, res, next) {

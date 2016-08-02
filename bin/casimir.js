@@ -32,21 +32,10 @@ var requestSettings = {
   namespace: properties.server.name
 }
 
-var casimir_router = casimir_core.router(__dirname + '/../routes/', __dirname + '/../app/controllers/')
-var router = function (req, res, next) {
-  if (!req.url.match(/\/v\d\//)) {
-    // when no version - redirect to /v0 (backward compatibility)
-    var parsedUrl = url.parse(req.url)
-    parsedUrl.pathname = '/v0' + parsedUrl.pathname
-    return res.redirect(307, url.format(parsedUrl)) // will redirect using same method
-  }
-  casimir_router(req, res, next)
-}
-
 // Add custom framwork modules for server
 properties.modules = {
   validator: require(__dirname + '/../app/modules/validator.js'),
-  router: router,
+  router: casimir_core.router(__dirname + '/../routes/', __dirname + '/../app/controllers/'),
   error: errorHandler({env: properties.ENV.type}),
   logger: logger,
   requestid: requestId(requestSettings)

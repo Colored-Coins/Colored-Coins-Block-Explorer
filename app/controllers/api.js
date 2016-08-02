@@ -2,906 +2,233 @@ var bitcoin = require('bitcoinjs-lib')
 var async = require('async')
 var moment = require('moment')
 var Cache = require('ttl')
+var errors = require('cc-errors')
 
 var casimir = global.casimir
 var properties = casimir.properties
 var db = casimir.db
-var logger = casimir.logger
 var scanner = casimir.scanner
+var _ = require('lodash')
 var cache = new Cache({
   ttl: 10 * 1000, // 10 Seconds
   capacity: 300
 })
 
-var Blocks = db.get_model('Blocks')
-var RawTransactions = db.get_model('RawTransactions')
-var Utxos = db.get_model('Utxo')
-var AddressesTransactions = db.get_model('AddressesTransactions')
-var AddressesUtxos = db.get_model('AddressesUtxos')
-var AssetsTransactions = db.get_model('AssetsTransactions')
-var AssetsUtxos = db.get_model('AssetsUtxos')
-var AssetsAddresses = db.get_model('AssetsAddresses')
+var sequelize = db.sequelize
+var Blocks = db.blocks
+var Transactions = db.transactions
+var Outputs = db.outputs
+var Inputs = db.inputs
+var AddressesOutputs = db.addressesoutputs
+var AssetsOutputs = db.assetsoutputs
+var Assets = db.assets
+
+var squel = require('squel')
+squel.cls.DefaultQueryBuilderOptions.autoQuoteFieldNames = true
+squel.cls.DefaultQueryBuilderOptions.nameQuoteCharacter = '"'
+squel.cls.DefaultQueryBuilderOptions.separator = '\n'
+var sql_builder = require('nodejs-sql')(squel)
 
 var MAX_BLOCKS_ALLOWED = 50
 
-var no_id = {
-  _id: 0
+var get_transaction = function (req, res, next) {
+  var params = req.data
+  var txid = params.txid
+
+  find_transactions([txid], function (err, transactions) {
+    if (err) return next(err)
+    var transaction = transactions[0]
+    return res.send(transaction)
+  })
 }
 
-properties.last_block = properties.last_block || 0
-var find_block = function (height_or_hash, callback) {
-  var conditions
-  if (typeof height_or_hash === 'string' && height_or_hash.length > 10) {
-    conditions = {
-      hash: height_or_hash
-    }
-  } else {
-    var height = parseInt(height_or_hash, 10)
-    if (height) {
-      conditions = {
-        height: height,
-        ccparsed: true
-      }
-    } else {
-      return callback()
-    }
-  }
-  conditions.ccparsed = true
-  return Blocks.findOne(conditions, no_id).lean().exec(callback)
+var get_asset_info = function (req, res, next) {
+  var params = req.data
+  var assetId = params.assetId
+  var utxo = params.utxo
+
+  find_asset_info(assetId, {utxo: utxo, with_transactions: false}, function (err, asset_info) {
+    if (err) return next(err)
+    delete asset_info['holders']
+    return res.send(asset_info)
+  })
 }
 
-var add_used_txid = function (tx, callback) {
-  if (!tx || !tx.vout) return callback(null, tx)
-  tx.ccdata = tx.ccdata || []
-  async.each(tx.vout, function (vout, cb) {
-    vout.assets = vout.assets || []
-    find_utxo(tx.txid, vout.n, function (err, utxo) {
-      if (err) return cb(err)
-      if (!utxo) return cb('cant find transaction: ' + tx.txid + ' output: ' + vout.n)
-      vout.used = utxo.used
-      vout.blockheight = utxo.blockheight
-      vout.usedBlockheight = utxo.usedBlockheight
-      vout.usedTxid = utxo.usedTxid
-      cb()
+var get_asset_info_with_transactions = function (req, res, next) {
+  var params = req.data
+  var assetId = params.assetId
+
+  find_asset_info_with_transactions(assetId, {with_transactions: true}, function (err, asset_info) {
+    if (err) return next(err)
+    return res.send(asset_info)
+  })
+}
+
+var get_addresses_info = function (req, res, next) {
+  var params = req.data
+  var addresses = params.addresses
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_addresses_info(addresses, confirmations, function (err, infos) {
+    if (err) return next(err)
+    infos.forEach(function (info) {
+      if ('transactions' in info) delete info['transactions']
+      if ('utxos' in info) delete info['utxos']
     })
-  },
-  function (err) {
-    if (err) return callback(err)
-    callback(null, tx)
+    return res.send(infos)
   })
 }
 
-var find_transaction = function (txid, callback) {
-  if (typeof txid === 'string') {
-    var conditions = {
-      txid: txid
-    }
+var get_addresses_info_with_transactions = function (req, res, next) {
+  var params = req.data
+  var addresses = params.addresses
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_addresses_info(addresses, confirmations, function (err, infos) {
+    if (err) return next(err)
+    return res.send(infos)
+  })
+}
+
+var get_block = function (req, res, next) {
+  var params = req.data
+  var height_or_hash = params.height_or_hash
+
+  find_block(height_or_hash, false, function (err, block) {
+    if (err) return next(err)
+    return res.send(block)
+  })
+}
+
+var get_main_stats = function (req, res, next) {
+  var cache_key = req.originalUrl
+  var ttl = 1 * 60 * 60 * 1000 // 1 hour
+  var main_stats = cache.get(cache_key)
+
+  if (main_stats) {
+    res.send(main_stats)
   } else {
-    return callback()
-  }
-  return RawTransactions.findOne(conditions, no_id).lean().exec(function (err, tx) {
-    if (err) return callback(err)
-    add_used_txid(tx, callback)
-  })
-}
-
-var find_transactions = function (txids, colored, callback) {
-  if (!Array.isArray(txids)) return callback(null, [])
-  var conditions = {
-    txid: { $in: txids }
-  }
-  if (colored) {
-    conditions.colored = true
-  }
-  return RawTransactions.find(conditions, no_id).sort('time').lean().exec(function (err, txs) {
-    if (err) return callback(err)
-    async.map(txs, function (tx, cb) {
-      add_used_txid(tx, cb)
-    },
-    callback)
-  })
-}
-
-var find_addresses_info = function (addresses, confirmations, callback) {
-  var ans = []
-  // logger.debug('addresses', JSON.stringify(addresses))
-  async.each(addresses, function (address, cb) {
-    // logger.debug('address', address)
-    find_address_info(address, confirmations, function (err, address_info) {
-      if (err) return cb(err)
-      ans.push(address_info)
-      cb()
+    find_main_stats(function (err, main_stats) {
+      cache.put(cache_key, main_stats, ttl)
+      if (err) return next(err)
+      return res.send(main_stats)
     })
-  },
-  function (err) {
-    // logger.debug('err', err)
-    // logger.debug('ans', ans)
-    return callback(err, ans)
+  }
+}
+
+var get_block_with_transactions = function (req, res, next) {
+  var params = req.data
+  var height_or_hash = params.height_or_hash
+
+  find_block(height_or_hash, true, function (err, block) {
+    if (err) return next(err)
+    return res.send(block)
   })
 }
 
-var find_address_info = function (address, confirmations, callback) {
-  var ans = {
-    address: address
-  }
-  var transactions = ans.transactions = []
-  var utxos = ans.utxos = []
-  var assets = assets = {}
-  ans.balance = 0
-  ans.received = 0
+var get_address_info = function (req, res, next) {
+  var params = req.data
+  var address = params.address
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
 
-  async.waterfall([
-    function (cb) {
-      AddressesTransactions.find({address: address}, no_id).lean().exec(cb)
-    },
-    function (address_txids, cb) {
-      var txids = []
-      address_txids.forEach(function (address_txid) {
-        txids.push(address_txid.txid)
-      })
-      var conditions = {
-        txid: {$in: txids}
-      }
-      if (confirmations) {
-        conditions.blockheight = {
-          $lte: properties.last_block - confirmations + 1,
-          $gte: 0
-        }
-      }
-      RawTransactions.find(conditions, no_id).lean().exec(cb)
-    },
-    function (txs, cb) {
-      txs.forEach(function (tx) {
-        if ('vout' in tx && tx.vout) {
-          tx.vout.forEach(function (vout) {
-            if ('scriptPubKey' in vout && vout.scriptPubKey) {
-              if ('addresses' in vout.scriptPubKey && vout.scriptPubKey.addresses && vout.scriptPubKey.addresses.indexOf(address) !== -1) {
-                ans.received += vout.value
-                if (vout.assets && vout.assets.length) {
-                  vout.assets.forEach(function (asset) {
-                    var assetId = asset.assetId
-                    assets[assetId] = assets[assetId] || {
-                      assetId: assetId,
-                      balance: 0,
-                      received: 0,
-                      divisibility: asset.divisibility,
-                      lockStatus: asset.lockStatus
-                    }
-                    assets[assetId].received += asset.amount
-                  })
-                }
-              }
-            }
-          })
-        }
+  find_addresses_info([address], confirmations, function (err, infos) {
+    if (err) return next(err)
+    var info = infos[0]
+    if ('transactions' in info) delete info['transactions']
+    if ('utxos' in info) delete info['utxos']
+    return res.send(info)
+  })
+}
 
-        if (transactions.indexOf(tx) === -1) {
-          transactions.push(tx)
+var get_address_info_with_transactions = function (req, res, next) {
+  var params = req.data
+  var address = params.address
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_addresses_info([address], confirmations, function (err, infos) {
+    if (err) return next(err)
+    var info = infos[0]
+    return res.send(info)
+  })
+}
+
+var get_addresses_utxos = function (req, res, next) {
+  var params = req.data
+  var addresses = params.addresses
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_addresses_utxos(addresses, confirmations, function (err, utxos) {
+    if (err) return next(err)
+    return res.send(utxos)
+  })
+}
+
+var get_address_utxos = function (req, res, next) {
+  var params = req.data
+  var address = params.address
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
+
+  find_address_utxos(address, confirmations, function (err, info) {
+    if (err) return next(err)
+    return res.send(info)
+  })
+}
+
+var search = function (req, res, next) {
+  var params = req.data
+  var arg = params.arg
+
+  is_transaction(arg, function (err, tx) {
+    if (err) return next(err)
+    if (tx) return res.send({transaction: arg})
+    is_asset(arg, function (err, is_asset) {
+      if (err) return next(err)
+      if (is_asset) return res.send({assetId: arg})
+      try {
+        var address = bitcoin.Address.fromBase58Check(arg)
+        if (address) {
+          return res.send({addressinfo: arg})
+        } else {
+          return next(['Not found.', 404])
         }
-      })
-      return cb()
-    },
-    function (cb) {
-      AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
-    },
-    function (address_utxos, cb) {
-      if (!address_utxos.length) return cb(null, [])
-      var conditions = []
-      address_utxos.forEach(function (address_utxo) {
-        var cond = {
-          txid: address_utxo.utxo.split(':')[0],
-          index: address_utxo.utxo.split(':')[1],
-          used: false
-        }
-        if (confirmations) {
-          cond.blockheight = {
-            $lte: properties.last_block - confirmations + 1,
-            $gte: 0
-          }
-        }
-        conditions.push(cond)
-      })
-      Utxos.find({$or: conditions}, no_id).lean().exec(cb)
-    },
-    function (unspents, cb) {
-      unspents.forEach(function (tx) {
-        ans.balance += tx.value
-        tx.assets = tx.assets || []
-        tx.assets.forEach(function (asset) {
-          var assetId = asset.assetId
-          assets[assetId] = assets[assetId] || {
-            assetId: assetId,
-            balance: 0,
-            received: 0,
-            divisibility: asset.divisibility,
-            lockStatus: asset.lockStatus
-          }
-          assets[assetId].balance += asset.amount
+      } catch (e) {
+        find_block(arg, false, function (err, block) {
+          if (err) return next(err)
+          if (block) return res.send({block: arg})
+          return next(['Not found.', 404])
         })
-        if (utxos.indexOf(tx) === -1) {
-          utxos.push(tx)
-        }
-      })
-      async.map(transactions, function (tx, cb) {
-        add_used_txid(tx, cb)
-      },
-      cb)
-    }
-  ],
-  function (err, txs) {
-    if (err) return callback(err)
-    ans.transactions = txs
-    ans.assets = []
-    for (var assetId in assets) {
-      ans.assets.push(assets[assetId])
-    }
-    ans.numOfTransactions = ans.transactions.length
-    return callback(err, ans)
-  })
-}
-
-var find_addresses_utxos = function (addresses, confirmations, callback) {
-  var ans = []
-  async.each(addresses, function (address, cb) {
-    find_address_utxos(address, confirmations, function (err, utxos) {
-      if (err) return cb(err)
-      // ans.push({address: address, utxos: utxos}) //TODO: change to this in V2
-      ans.push(utxos)
-      cb()
-    })
-  },
-  function (err) {
-    return callback(err, ans)
-  })
-}
-
-var find_address_utxos = function (address, confirmations, callback) {
-  var ans = {
-    address: address
-  }
-  var utxos = ans.utxos = []
-
-  async.waterfall([
-     function (cb) {
-      AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
-    },
-    function (address_utxos, cb) {
-      if (!address_utxos.length) return cb(null, [])
-      var conditions = []
-      address_utxos.forEach(function (address_utxo) {
-        var cond = {
-          txid: address_utxo.utxo.split(':')[0],
-          index: address_utxo.utxo.split(':')[1],
-          used: false
-        }
-        if (confirmations) {
-          cond.blockheight = {
-            $lte: properties.last_block - confirmations + 1,
-            $gte: 0
-          }
-        }
-        conditions.push(cond)
-      })
-      Utxos.find({$or: conditions}, no_id).lean().exec(cb)
-    },
-    function (unspents, cb) {
-      unspents.forEach(function (tx) {
-        tx.assets = tx.assets || []
-        if (utxos.indexOf(tx) === -1) {
-          utxos.push(tx)
-        }
-      })
-      return cb()
-    }
-  ],
-  function (err) {
-    return callback(err, ans)
-  })
-}
-
-var count_asset_transactions = function (assetId, type, callback) {
-  var conditions = {assetId: assetId}
-  if (type) {
-    conditions.type = type
-  }
-  AssetsTransactions.count(conditions).lean().exec(callback)  
-}
-
-var find_asset_transactions = function (assetId, confirmations, type, callback) {
-  if (typeof type === 'function') {
-    callback = type
-    type = null
-  }
-  var ans = {
-    assetId: assetId
-  }
-  var transactions = ans.transactions = []
-
-  async.waterfall([
-     function (cb) {
-      var conditions = {assetId: assetId}
-      if (type) {
-        conditions.type = type
-      }
-      AssetsTransactions.find(conditions, no_id).lean().exec(cb)
-    },
-    function (assets_transactions, cb) {
-      if (!assets_transactions.length) return cb(null, [])
-      var conditions = []
-      assets_transactions.forEach(function (address_txids) {
-        var cond = {
-          txid: address_txids.txid
-        }
-        if (confirmations) {
-          cond.blockheight = {
-            $lte: properties.last_block - confirmations + 1,
-            $gte: 0
-          }
-        }
-        conditions.push(cond)
-      })
-      RawTransactions.find({$or: conditions}, no_id).lean().exec(cb)
-    },
-    function (txs, cb) {
-      txs.forEach(function (tx) {
-        if (transactions.indexOf(tx) === -1) {
-          transactions.push(tx)
-        }
-      })
-      return cb()
-    },
-    function (cb) {
-      async.map(transactions, function (tx, cb) {
-        add_used_txid(tx, cb)
-      },
-      cb)
-    }
-  ],
-  function (err, transactions) {
-    if (err) return callback(err)
-    ans.transactions = transactions
-    return callback(null, ans)
-  })
-}
-
-var find_asset_first_block = function (assetId, callback) {
-  var conditions = {assetId: assetId}
-  conditions.type = 'issuance'
-  AssetsTransactions.find(conditions).lean().exec(function (err, assets_transactions) {
-    if (err) return callback(err)
-    var txids = []
-    assets_transactions.forEach(function (asset_transaction) {
-      txids.push(asset_transaction.txid)
-    })
-    RawTransactions.find({txid: {$in: txids}, blockheight: {$gte: 0}}, {blockheight:1, _id:0}).sort({blockheight: 1}).limit(1).lean().exec(function (err, transactions) {
-      if (err) return callback(err)
-      var blockheight = transactions.length? transactions[0].blockheight : -1
-      callback(null, blockheight)
-    })
-  })
-}
-
-var find_asset_utxos = function (assetId, confirmations, callback) {
-  var ans = {
-    assetId: assetId
-  }
-  var utxos = ans.utxos = []
-
-  async.waterfall([
-     function (cb) {
-      AssetsUtxos.find({assetId: assetId}, no_id).lean().exec(cb)
-    },
-    function (assets_utxos, cb) {
-      if (!assets_utxos.length) return cb(null, [])
-      var conditions = []
-      assets_utxos.forEach(function (address_utxo) {
-        var cond = {
-          txid: address_utxo.utxo.split(':')[0],
-          index: address_utxo.utxo.split(':')[1],
-          used: false
-        }
-        if (confirmations) {
-          cond.blockheight = {
-            $lte: properties.last_block - confirmations + 1,
-            $gte: 0
-          }
-        }
-        conditions.push(cond)
-      })
-      Utxos.find({$or: conditions}, no_id).lean().exec(cb)
-    },
-    function (unspents, cb) {
-      unspents.forEach(function (tx) {
-        tx.assets = tx.assets || []
-        if (utxos.indexOf(tx) === -1) {
-          utxos.push(tx)
-        }
-      })
-      return cb()
-    }
-  ],
-  function (err) {
-    return callback(err, ans)
-  })
-}
-
-var find_blocks = function (start, end, callback) {
-  start = start || 0
-  end = end || 0
-
-  start = parseInt(start, 10)
-  end = parseInt(end, 10)
-
-  if (typeof start !== 'number' || typeof end !== 'number') {
-    return callback('Arguments must be numbers.')
-  }
-  var conditions = {}
-  var limit = MAX_BLOCKS_ALLOWED
-  if (start < 0 && !end) {
-    limit = -start
-    if (limit > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more then ' + MAX_BLOCKS_ALLOWED + ' blocks.')
-    }
-    conditions = {
-      ccparsed: true
-    }
-  } else {
-    if (end - start + 1 > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more then ' + MAX_BLOCKS_ALLOWED + ' blocks.')
-    }
-    conditions = {
-      height: {$gte: start, $lte: end},
-      ccparsed: true
-    }
-  }
-  Blocks.find(conditions, no_id).lean().sort('-height').limit(limit).exec(callback)
-}
-
-var find_asset_holders = function (assetId, confirmations, callback) {
-  var holders = {}
-  var divisibility
-  var lockStatus
-  var some_utxo
-  var aggregationPolicy
-  find_asset_utxos(assetId, confirmations, function (err, asset_utxos) {
-    if (err) return callback(err)
-    if (asset_utxos.utxos) {
-      asset_utxos.utxos.forEach(function (utxo) {
-        if (utxo.assets) {
-          utxo.assets.forEach(function (asset) {
-            if (asset.assetId === assetId && asset.amount) {
-              if (!some_utxo) {
-                some_utxo = utxo.txid + ':' + utxo.index
-              }
-              divisibility = asset.divisibility
-              lockStatus = asset.lockStatus
-              aggregationPolicy = asset.aggregationPolicy
-              if (utxo.scriptPubKey && utxo.scriptPubKey.addresses) {
-                utxo.scriptPubKey.addresses.forEach(function (address) {
-                  holders[address] = holders[address] || 0
-                  holders[address] += asset.amount
-                })
-              }
-            }
-          })
-        }
-      })
-    }
-    var ans = {
-      assetId: assetId,
-      holders: [],
-      divisibility: divisibility,
-      lockStatus: lockStatus,
-      aggregationPolicy: aggregationPolicy,
-      someUtxo: some_utxo
-    }
-    for (var address in holders) {
-      ans.holders.push({
-        address: address,
-        amount: holders[address]
-      })
-    }
-    callback(null, ans)
-  })
-}
-
-var find_asset_info = function (assetId, with_transactions, callback) {
-  if (typeof with_transactions == 'function') {
-    callback = with_transactions
-    with_transactions = false
-  }
-
-  var functions = []
-  functions[0] = function (cb) {
-    find_asset_holders(assetId, 0, cb)
-  }
-  if (!with_transactions) {
-    functions[1] = function (cb) {
-      count_asset_transactions(assetId, 'transfer', cb)
-    }
-    functions[2] = function (cb) {
-      count_asset_transactions(assetId, 'issuance', cb)
-    }
-    functions[3] = function (cb) {
-      find_asset_first_block(assetId, cb)
-    }
-
-  } else {
-    functions[1] = function (cb) {
-      find_asset_transactions(assetId, 0, 'transfer', cb)
-    }
-    functions[2] = function (cb) {
-      find_asset_transactions(assetId, 0, 'issuance', cb)
-    }
-  }
-
-  async.parallel(functions,
-  function (err, results) {
-    if (err) return callback(err)
-
-    var holders = results[0]
-    var asset_info = holders
-    asset_info.totalSupply = 0
-    asset_info.numOfHolders = 0
-    holders.holders.forEach(function (asset) {
-      asset_info.totalSupply += asset.amount
-      asset_info.numOfHolders++
-    })
-
-    if (!with_transactions) {
-      asset_info.numOfTransfers = results[1]
-      asset_info.numOfIssuance = results[2]
-      asset_info.firstBlock = results[3]
-
-    } else {
-      asset_info.transfers = results[1].transactions
-      asset_info.issuances = results[2].transactions
-      asset_info.numOfTransfers = asset_info.transfers.length
-      asset_info.numOfIssuances = asset_info.issuances.length
-      asset_info.issuances.forEach(function (transaction) {
-        if (!asset_info.firstBlock || asset_info.firstBlock === -1 || (transaction.blockheight !== -1 && asset_info.firstBlock > transaction.blockheight)) {
-          asset_info.firstBlock = transaction.blockheight
-        }
-      })
-    }
-
-    return callback(null, asset_info)
-  })
-}
-
-var find_block_with_transactions = function (height_or_hash, colored, callback) {
-  find_block(height_or_hash, function (err, block) {
-    if (err) return callback(err)
-    if (block && block.tx) {
-      find_transactions(block.tx, colored, function (err, transactions) {
-        if (err) return callback(err)
-        block.transactions = transactions
-        return callback(null, block)
-      })
-    } else {
-      return callback(null, block)
-    }
-  })
-}
-
-var find_first_issuance = function (assetId, utxo, callback) {
-  logger.debug(JSON.stringify(utxo.split(':')))
-  var conditions = {
-    txid: utxo.split(':')[0],
-    index: utxo.split(':')[1]
-  }
-  Utxos.findOne(conditions, no_id).lean().exec(function (err, utxo_obj) {
-    if (err) return callback(err)
-    if (!utxo_obj) return callback()
-    var found = false
-    utxo_obj.assets = utxo_obj.assets || []
-    utxo_obj.assets.forEach(function (asset) {
-      if (!found && asset.assetId === assetId) {
-        found = true
-        return callback(null, asset.issueTxid)
       }
     })
-    if (!found) {
-      return callback()
-    }
   })
 }
 
-var find_main_stats = function (callback) {
-  var main_stats = {}
-  async.parallel([
-    function (cb) {
-      AssetsTransactions.distinct('txid').exec(function (err, cc_transactions) {
-        if (err) return cb(err)
-        main_stats.numOfCCTransactions = cc_transactions.length
-        cb()
-      })
-    },
-    function (cb) {
-      AssetsTransactions.distinct('assetId').exec(function (err, assets) {
-        if (err) return cb(err)
-        main_stats.numOfAssets = assets.length
-        cb()
-      })
-    },
-    function (cb) {
-      AssetsAddresses.distinct('address').exec(function (err, holders) {
-        if (err) return cb(err)
-        main_stats.numOfHolders = holders.length
-        cb()
-      })
-    }
-  ],
-  function (err) {
-    return callback(err, main_stats)
+var get_blocks = function (req, res, next) {
+  var params = req.data
+  var start = params.start
+  var end = params.end
+  find_blocks(start, end, function (err, blocks) {
+    if (err) return next(err)
+    return res.send(blocks)
   })
 }
 
-var find_transactions_by_intervals = function (assetId, start, end, interval, callback) {
-  end = end || moment.utc().millisecond(999).seconds(59).minutes(59).hours(23).valueOf() + 1
-  start = start || end - 10 * 24 * 60 * 60 * 1000
-  interval = interval || (end - start) / 10
+var get_asset_holders = function (req, res, next) {
+  var params = req.data
+  var assetId = params.assetId
+  var confirmations = params.confirmations || 0
+  confirmations = parseInt(confirmations, 10)
 
-  start = Math.round(start)
-  end = Math.round(end)
-  interval = Math.round(interval)
-
-  if (Math.round((end - start) / interval) > 1000) return callback(['Sample resolution to high.', 500])
-
-  var conditions = {
-
-  }
-  if (assetId) {
-    conditions.assetId = assetId
-  }
-
-  AssetsTransactions.distinct('txid', conditions).exec(function (err, txids) {
-    var intervals = []
-    if (err) return callback(err)
-    var from = start
-    async.whilst(
-      function () { return from < end },
-      function (cb) {
-        var untill = Math.min(from + interval, end)
-        from = Math.round(from)
-        untill = Math.round(untill)
-        var cond = {
-          txid: {$in: txids},
-          blocktime: {
-            $gte: from, // from
-            $lt: untill
-          }
-        }
-        RawTransactions.count(cond).exec(function (err, txs_num) {
-          if (err) return cb(err)
-          // logger.debug('count: ' + txs_num)
-          intervals.push({
-            from: from,
-            untill: untill,
-            txsSum: txs_num
-          })
-          from = untill
-          cb()
-        })
-      },
-      function (err) {
-        callback(err, intervals)
-      }
-    )
+  find_asset_holders(assetId, confirmations, function (err, holders) {
+    if (err) return next(err)
+    return res.send(holders)
   })
 }
-
-var find_cc_transactions = function (skip, limit, callback) {
-  limit = limit || 10
-  limit = parseInt(limit, 10)
-  limit = Math.min(limit, 5000)
-
-  skip = skip || 0
-  skip = parseInt(skip, 10)
-
-  var txs
-
-  async.waterfall([
-    function (cb) {
-      var conditions = {
-        colored: true,
-        ccparsed: true,
-        blockheight: -1
-      }
-      RawTransactions.find(conditions, no_id).lean().sort('-blocktime').limit(limit).skip(skip).exec(cb)
-    },
-    function (mempool_txs, cb) {
-      txs = mempool_txs
-      if (txs.length) {
-        limit -= txs.length
-        skip = 0
-        return cb()
-      }
-      var conditions = {
-        colored: true,
-        ccparsed: true,
-        blockheight: -1
-      }
-      RawTransactions.find(conditions).count().exec(function (err, count) {
-        if (err) return cb(err)
-        skip -= count
-        skip = Math.max(skip, 0)
-        cb()
-      })
-    },
-    function (cb) {
-      if (!limit) return cb()
-       var conditions = {
-        colored: true,
-        ccparsed: true,
-        blockheight: {$gte: 0}
-      }
-      RawTransactions.find(conditions, no_id).lean().sort('-blockheight').limit(limit).skip(skip).exec(function (err, conf_txs) {
-        if (err) return cb(err)
-        txs = txs.concat(conf_txs)
-        cb()
-      })
-    }
-  ], function (err) {
-    if (err) return callback(err)
-    callback(null, txs)
-  })
-}
-
-var find_popular_assets = function (sort_by, limit, callback) {
-  var collection
-  if (sort_by === 'transactions') {
-    collection = AssetsTransactions
-  } else if (sort_by === 'holders') {
-    collection = AssetsAddresses
-  } else {
-    collection = AssetsTransactions
-  }
-  collection.aggregate([
-    {
-      $group: {
-        _id: {assetId: '$assetId'},
-        count: { $sum: 1 }
-      }
-    }
-  ]).sort('-count').limit(limit).exec(function (err, asset_counts) {
-    if (err) return callback(err)
-    var assets = []
-    var assetsOrder = {}
-    var i = 0
-    asset_counts.forEach(function (asset_count) {
-      assetsOrder[asset_count._id.assetId] = i++
-    })
-    async.each(asset_counts, function (asset_count, cb) {
-      find_asset_info(asset_count._id.assetId, function (err, info) {
-        if (err) return cb(err)
-        if ('holders' in info) delete info['holders']
-        assets[assetsOrder[asset_count._id.assetId]] = info
-        cb()
-      })
-    },
-    function (err) {
-      callback(err, assets)
-    })
-  })
-}
-
-var find_utxo = function (txid, index, callback) {
-  Utxos.findOne({txid: txid, index: index}, no_id).lean().exec(function (err, utxo) {
-    if (err) return callback(err)
-    if (utxo) utxo.assets = utxo.assets || []
-    callback(null, utxo)
-  })
-}
-
-var find_utxos = function (utxos, callback) {
-  if (!utxos || !utxos.length) return callback(null, [])
-  var or = utxos.map(function (utxo) {
-    return {txid: utxo.txid, index: utxo.index}
-  })
-  Utxos.find({$or: or}, no_id).lean().exec(function (err, txos) {
-    if (err) return callback(err)
-    txos.forEach(function (utxo) {
-      utxo.assets = utxo.assets || []
-    })
-    callback(null, txos)
-  })
-}
-
-var is_asset = function (assetId, callback) {
-  AssetsTransactions.findOne({assetId: assetId}, function (err, asset_transaction) {
-    if (err) return callback(err)
-    return callback(null, !!asset_transaction)
-  })
-}
-
-var find_mempool_txids = function (colored, callback) {
-  var conditions = {
-    blockheight: -1
-  }
-  if (colored) {
-    conditions.colored = true
-  }
-  var projection = {txid: 1, _id: 0}
-  RawTransactions.find(conditions, projection).lean().exec(function (err, txs) {
-    if (err) return callback(err)
-    return callback(null, txs.map(function (tx) {
-      return tx.txid
-    }))
-  })
-}
-
-var find_info = function (callback) {
-  scanner.get_info(function (err, info) {
-    if (err) return callback(err)
-    delete info.balance
-    info.mempool = global.mempool
-    find_last_blocks(function (err, blocks) {
-      if (err) return callback(err)
-      info.parsedblocks = blocks.last_parsed_block
-      info.fixedblocks = blocks.last_fixed_block
-      info.ccparsedblocks = blocks.last_cc_parsed_block
-      info.timeStamp = new Date()
-      callback(null, info)
-    })
-  })
-}
-
-var find_last_parsed_block = function (callback) {
-  var conditions = {
-    txinserted: true
-  }
-  Blocks.findOne(conditions, no_id)
-  .lean()
-  .sort('-height')
-  .exec(function (err, block_data) {
-    if (err) return callback(err)
-    if (!block_data) return callback(null, -1)
-    callback(null, block_data.height)
-  })
-}
-
-var find_last_fixed_block = function (callback) {
-  var conditions = {
-    txinserted: true,
-    txsparsed: true
-  }
-  Blocks.findOne(conditions, no_id)
-  .lean()
-  .sort('-height')
-  .exec(function (err, block_data) {
-    if (err) return callback(err)
-    if (!block_data) return callback(null, -1)
-    callback(null, block_data.height)
-  })
-}
-
-var find_last_cc_parsed_block = function (callback) {
-  var conditions = {
-    txinserted: true,
-    txsparsed: true,
-    ccparsed: true
-  }
-  Blocks.findOne(conditions, no_id)
-  .lean()
-  .sort('-height')
-  .exec(function (err, block_data) {
-    if (err) return callback(err)
-    if (!block_data) return callback(null, -1)
-    callback(null, block_data.height)
-  })
-}
-
-var find_last_blocks = function (callback) {
-  async.parallel({
-    last_parsed_block: find_last_parsed_block,
-    last_fixed_block: find_last_fixed_block,
-    last_cc_parsed_block: find_last_cc_parsed_block
-  },
-  callback)
-}
-
-// ---------------------------
 
 var get_info = function (req, res, next) {
   find_info(function (err, info) {
@@ -924,13 +251,14 @@ var get_utxo = function (req, res, next) {
   var params = req.data
   var txid = params.txid
   var index = params.index
-  
+
   find_utxo(txid, index, function (err, utxo) {
     if (err) return next(err)
     utxo = utxo || null
     res.send(utxo)
   })
 }
+
 var get_utxos = function (req, res, next) {
   var params = req.data
   var utxos = params.utxos
@@ -944,22 +272,20 @@ var get_utxos = function (req, res, next) {
 var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
-  var callback
-  console.time('parse_tx: full_parse ' + txid)
-  callback = function (data) {
-    if (data.priority_parsed === txid) {
-      console.timeEnd('parse_tx: full_parse ' + txid)
-      process.removeListener('message', callback)
-      if (data.err) return next(data.err)
-      res.send({txid: txid})
-    }
+  function isTransactionRollbackError (err) {
+    var errorCode = err && (err.code || (err.original && err.original.code))
+    return errorCode && errorCode.length === 5 && errorCode.substring(0, 2) === '40' // PostgreSQL Transaction Rollback prefix
   }
-
-  process.on('message', callback)
-
-  console.time('priority_parse: api_to_parent ' + txid)
-  process.send({to: properties.roles.SCANNER, parse_priority: txid})
-  console.timeEnd('priority_parse: api_to_parent ' + txid)
+  console.time('parse_tx: full_parse ' + txid)
+  scanner.priority_parse(txid, function (err) {
+    if (isTransactionRollbackError(err)) {
+      console.log('parse_tx failed with transaction rollback error, retrying ' + txid)
+      return parse_tx(req, res, next)
+    }
+    if (err) return next(err)
+    console.timeEnd('parse_tx: full_parse ' + txid)
+    res.send({txid: txid})
+  })
 }
 
 var get_popular_assets = function (req, res, next) {
@@ -1028,268 +354,893 @@ var get_transactions_by_intervals = function (req, res, next) {
   }
 }
 
-var get_main_stats = function (req, res, next) {
-  var cache_key = req.originalUrl
-  var ttl = 1 * 60 * 60 * 1000 // 1 hour
-  var main_stats = cache.get(cache_key)
+var is_transaction = function (txid, callback) {
+  Transactions.findById(txid, {raw: true, logging: console.log, benchmark: true})
+    .then(function (tx) { callback(null, !!tx) })
+    .catch(callback)
+}
 
-  if (main_stats) {
-    res.send(main_stats)
+var get_find_transactions_query = function (transactions_condition) {
+  return '' +
+    'SELECT\n' +
+    '  ' + sql_builder.to_columns_of_model(Transactions, {exclude: ['index_in_block']}) + ',\n' +
+    '  to_json(array(\n' +
+    '    SELECT\n' +
+    '      vin\n' +
+    '    FROM\n' +
+    '      (SELECT\n' +
+    '       ' + sql_builder.to_columns_of_model(Inputs, {exclude: ['input_index', 'input_txid', 'output_id']}) + ',\n' +
+    '       "previousOutput"."scriptPubKey" AS "previousOutput",\n' +
+    '       to_json(array(\n' +
+    '          SELECT\n' +
+    '            assets\n' +
+    '          FROM\n' +
+    '            (SELECT\n' +
+    '              ' + sql_builder.to_columns_of_model(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
+    '              assets.*\n' +
+    '            FROM\n' +
+    '              assetsoutputs\n' +
+    '            INNER JOIN assets ON assets."assetId" = assetsoutputs."assetId"\n' +
+    '            WHERE assetsoutputs.output_id = inputs.output_id ORDER BY index_in_output)\n' +
+    '        AS assets)) AS assets\n' +
+    '      FROM\n' +
+    '        inputs\n' +
+    '      LEFT OUTER JOIN\n' +
+    '        (SELECT outputs.id, outputs."scriptPubKey"\n' +
+    '         FROM outputs) AS "previousOutput" ON "previousOutput".id = inputs.output_id\n' +
+    '      WHERE\n' +
+    '        inputs.input_txid = transactions.txid\n' +
+    '      ORDER BY input_index) AS vin)) AS vin,\n' +
+    '  to_json(array(\n' +
+    '    SELECT\n' +
+    '      vout\n' +
+    '    FROM\n' +
+    '      (SELECT\n' +
+    '        ' + sql_builder.to_columns_of_model(Outputs, {exclude: ['id', 'txid']}) + ',\n' +
+    '        to_json(array(\n' +
+    '         SELECT assets FROM\n' +
+    '           (SELECT\n' +
+    '              ' + sql_builder.to_columns_of_model(AssetsOutputs, {exclude: ['index_in_output', 'output_id']}) + ',\n' +
+    '              assets.*\n' +
+    '            FROM\n' +
+    '              assetsoutputs\n' +
+    '            INNER JOIN assets ON assets."assetId" = assetsoutputs."assetId"\n' +
+    '            WHERE assetsoutputs.output_id = outputs.id ORDER BY index_in_output)\n' +
+    '        AS assets)) AS assets\n' +
+    '      FROM\n' +
+    '        outputs\n' +
+    '      WHERE outputs.txid = transactions.txid\n' +
+    '      ORDER BY n) AS vout)) AS vout\n' +
+    'FROM\n' +
+    '  transactions\n' +
+    'WHERE\n' +
+    '  ' + transactions_condition
+}
+
+var find_transactions = function (txids, callback) {
+  var find_transactions_query = get_find_transactions_query('txid IN ' + sql_builder.to_values(txids)) + ';'
+  sequelize.query(find_transactions_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (transactions) {
+      transactions.forEach(function (transaction) {
+        transaction.confirmations = properties.last_block - transaction.blockheight + 1
+      })
+      callback(null, transactions)
+    })
+    .catch(callback)
+}
+
+var find_block = function (height_or_hash, with_transactions, callback) {
+  var block_condition
+  if (typeof height_or_hash === 'string' && height_or_hash.length > 10) {
+    block_condition = 'hash = \'' + height_or_hash + '\''
   } else {
-    find_main_stats(function (err, main_stats) {
-      cache.put(cache_key, main_stats, ttl)
-      if (err) return next(err)
-      return res.send(main_stats)
-    })
-  }
-}
-
-var get_block = function (req, res, next) {
-  var params = req.data
-  var height_or_hash = params.height_or_hash
-
-  find_block(height_or_hash, function (err, block) {
-    if (err) return next(err)
-    return res.send(block)
-  })
-}
-
-var get_transaction = function (req, res, next) {
-  var params = req.data
-  var txid = params.txid
-
-  find_transaction(txid, function (err, tx) {
-    if (err) return next(err)
-    return res.send(tx)
-  })
-}
-
-var get_asset_info = function (req, res, next) {
-  var params = req.data
-  var assetId = params.assetId
-  var utxo = params.utxo
-  var verbosity = parseInt(params.verbosity)
-  verbosity = ([0,1].indexOf(verbosity) > -1)? verbosity : 1
-
-  logger.debug(utxo)
-
-  async.parallel([
-    function (cb) {
-      if (verbosity == 0) return cb()
-      find_asset_info(assetId, false, cb) 
-    },
-    function (cb) {
-      if (!utxo) return cb()
-      find_first_issuance(assetId, utxo, cb)  
+    var height = parseInt(height_or_hash, 10)
+    if (height) {
+      block_condition = 'height = ' + height_or_hash
+    } else {
+      return callback()
     }
-  ],
-  function (err, results) {
-    if (err) return next(err)
-    var asset_info = results[0] || {}
-    var issuanceTxid = results[1]
-    if (issuanceTxid) asset_info.issuanceTxid = issuanceTxid
-    if ((verbosity < 2) && ('holders' in asset_info)) delete asset_info['holders']
-    res.send(asset_info)
-  })
-}
+  }
+  block_condition += ' AND ccparsed = TRUE'
 
-var get_asset_info_with_transactions = function (req, res, next) {
-  var params = req.data
-  var assetId = params.assetId
-
-  find_asset_info(assetId, true, function (err, info) {
-    if (err) return next(err)
-    return res.send(info)
-  })
-}
-
-var get_addresses_info = function (req, res, next) {
-  var params = req.data
-  var addresses = params.addresses
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
-
-  find_addresses_info(addresses, confirmations, function (err, infos) {
-    if (err) return next(err)
-    infos.forEach(function (info) {
-      if ('transactions' in info) delete info['transactions']
-      if ('utxos' in info) delete info['utxos']
-    })
-    return res.send(infos)
-  })
-}
-var get_addresses_info_with_transactions = function (req, res, next) {
-  var params = req.data
-  var addresses = params.addresses
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
-
-  find_addresses_info(addresses, confirmations, function (err, infos) {
-    if (err) return next(err)
-    return res.send(infos)
-  })
-}
-
-var get_address_info = function (req, res, next) {
-  var params = req.data
-  var address = params.address
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
-
-  find_address_info(address, confirmations, function (err, info) {
-    if (err) return next(err)
-    if ('transactions' in info) delete info['transactions']
-    if ('utxos' in info) delete info['utxos']
-    return res.send(info)
-  })
-}
-var get_address_info_with_transactions = function (req, res, next) {
-  var params = req.data
-  var address = params.address
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
-
-  find_address_info(address, confirmations, function (err, info) {
-    if (err) return next(err)
-    return res.send(info)
-  })
-}
-
-var get_addresses_utxos = function (req, res, next) {
-  var params = req.data
-  var addresses = params.addresses
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
-
-  find_addresses_utxos(addresses, confirmations, function (err, utxos) {
-    if (err) return next(err)
-    return res.send(utxos)
-  })
-}
-
-var get_address_utxos = function (req, res, next) {
-  var params = req.data
-  var address = params.address
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
-
-  find_address_utxos(address, confirmations, function (err, info) {
-    if (err) return next(err)
-    return res.send(info)
-  })
-}
-
-// var to_set = function (arr1, arr2) {
-//   var ans = null
-//   if (Array.isArray(arr1) && Array.isArray(arr2)) {
-//     ans = arr1.slice()
-//     arr2.forEach(function (item) {
-//       if (ans.indexOf(item) === -1) {
-//         ans.push(item)
-//       }
-//     })
-//   }
-//   return ans
-// }
-
-var search = function (req, res, next) {
-  var params = req.data
-  var arg = params.arg
-
-  find_transaction(arg, function (err, tx) {
-    if (err) return next(err)
-    if (tx) return res.send({transaction: arg})
-    is_asset(arg, function (err, is_asset) {
-      if (err) return next(err)
-      if (is_asset) return res.send({assetId: arg})
-      try {
-        var address = bitcoin.Address.fromBase58Check(arg)
-        if (address) {
-          return res.send({addressinfo: arg})
-        } else {
-          return next(['Not found.', 404])
-        }
-      } catch (e) {
-        find_block(arg, function (err, block) {
-          if (err) return next(err)
-          if (block) return res.send({block: arg})
-          return next(['Not found.', 404])
+  var find_block_query = '' +
+    'SELECT\n' +
+    '  blocks.*,\n' +
+    '  to_json(array(\n' +
+    (with_transactions ? (
+    '    SELECT\n' +
+    '      transactions\n' +
+    '    FROM\n' +
+    '      (' + get_find_transactions_query('transactions.blockheight = blocks.height') + '\n' +
+    '    ORDER BY\n' +
+    '      index_in_block) AS transactions)) AS transactions') : (
+    '      SELECT\n' +
+    '        txid\n' +
+    '      FROM\n' +
+    '        transactions\n' +
+    '      WHERE\n' +
+    '        transactions.blockheight = blocks.height\n' +
+    '      ORDER BY\n' +
+    '        transactions.index_in_block)) AS tx')) + '\n' +
+    'FROM\n' +
+    '  blocks\n' +
+    'WHERE\n' +
+    '  ' + block_condition
+  sequelize.query(find_block_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (blocks) {
+      var block = blocks[0]
+      if (!block) return callback()
+      var confirmations = properties.last_block - block.height + 1
+      block.confirmations = confirmations
+      if (with_transactions) {
+        block.tx = _.map(block.transactions, 'txid')
+        block.transactions.forEach(function (transaction) {
+          transaction.confirmations = confirmations
         })
       }
+      callback(null, block)
+    })
+    .catch(callback)
+}
+
+var find_main_stats = function (callback) {
+  var main_stats = {}
+  async.parallel([
+    function (cb) {
+      var query = '' +
+        'SELECT\n' +
+        '  COUNT(DISTINCT assetstransactions."assetId") AS "numOfAssets",\n' +
+        '  COUNT(DISTINCT assetstransactions.txid) AS "numOfCCTransactions"\n' +
+        'FROM\n' +
+        '  assetstransactions;'
+      sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (info) {
+          main_stats.numOfAssets = info[0].numOfAssets
+          main_stats.numOfCCTransactions = info[0].numOfCCTransactions
+          cb()
+        })
+        .catch(cb)
+    },
+    function (cb) {
+      var query = '' +
+        'SELECT\n' +
+        '  COUNT(DISTINCT assetsaddresses.address) AS "numOfHolders"\n' +
+        'FROM\n' +
+        '  assetsaddresses;'
+      sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (info) {
+          main_stats.numOfHolders = info[0].numOfHolders
+          cb()
+        })
+        .catch(cb)
+    }
+  ],
+  function (err) {
+    return callback(err, main_stats)
+  })
+}
+
+var find_transactions_by_intervals = function (assetId, start, end, interval, callback) {
+  console.time('find_transactions_by_intervals')
+  end = end || moment.utc().millisecond(999).seconds(59).minutes(59).hours(23).valueOf() + 1
+  start = start || end - 10 * 24 * 60 * 60 * 1000
+  interval = interval || (end - start) / 10
+
+  start = Math.round(start)
+  end = Math.round(end)
+  interval = Math.round(interval)
+
+  if (Math.round((end - start) / interval) > 1000) return callback(new errors.ResolutionTooHighError())
+
+  var query = '' +
+    'SELECT\n' +
+    '  DIV(blocktime - :start, :interval) AS interval_index,\n' +
+    '  COUNT(transactions.txid) AS "txsSum"\n' +
+    'FROM transactions\n' +
+    'JOIN assetstransactions ON assetstransactions.txid = transactions.txid\n' +
+    'WHERE transactions.blocktime BETWEEN :start AND :end\n' +
+    'GROUP BY interval_index\n' +
+    'ORDER BY interval_index'
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {start: start, interval: interval, end: end}, logging: console.log, benchmark: true})
+    .then(function (counts) {
+      var ans = counts.map(function (count) {
+        var from = (count.interval_index * interval) + start
+        return {
+          txsSum: count.txsSum,
+          from: from,
+          untill: from + interval
+        }
+      })
+      callback(null, ans)
+    })
+    .catch(callback)
+}
+
+var find_cc_transactions = function (skip, limit, callback) {
+  limit = limit || 10
+  limit = parseInt(limit, 10)
+  limit = Math.min(limit, 5000)
+
+  skip = skip || 0
+  skip = parseInt(skip, 10)
+
+  var txs
+
+  async.waterfall([
+    function (cb) {
+      console.time('find_cc_transactions find_mempool_cc_txs_query')
+      var find_mempool_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE AND blockheight = -1') + '\n' +
+        'ORDER BY\n' +
+        '  blocktime DESC\n' +
+        'LIMIT ' + limit + '\n' +
+        'OFFSET ' + skip
+      sequelize.query(find_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (cc_mempool_txs) { cb(null, cc_mempool_txs) })
+        .catch(cb)
+    },
+    function (cc_mempool_txs, cb) {
+      console.timeEnd('find_cc_transactions find_mempool_cc_txs_query')
+      console.time('find_cc_transactions count_mempool_cc_txs_query')
+      txs = cc_mempool_txs
+      if (txs.length) {
+        limit -= txs.length
+        skip = 0
+        return cb()
+      }
+      var count_mempool_cc_txs_query = '' +
+        'SELECT COUNT(*)\n' +
+        'FROM\n' +
+        '  transactions\n' +
+        'WHERE\n' +
+        '  ccparsed = TRUE AND colored = TRUE AND blockheight = -1'
+      sequelize.query(count_mempool_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (results) {
+          var count = results[0].count
+          skip -= count
+          skip = Math.max(skip, 0)
+          cb()
+        })
+        .catch(cb)
+    },
+    function (cb) {
+      console.timeEnd('find_cc_transactions count_mempool_cc_txs_query')
+      console.time('find_cc_transactions find_latest_confirmed_cc_txs_query')
+      if (!limit) return cb()
+      var find_latest_confirmed_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE AND blockheight > 0') + '\n' +
+        'ORDER BY\n' +
+        '  blockheight DESC\n' +
+        'LIMIT ' + limit + '\n' +
+        'OFFSET ' + skip
+
+      sequelize.query(find_latest_confirmed_cc_txs_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+        .then(function (conf_txs) {
+          txs = txs.concat(conf_txs)
+          cb()
+        })
+        .catch(cb)
+    }
+  ], function (err) {
+    if (err) return callback(err)
+    console.timeEnd('find_cc_transactions find_latest_confirmed_cc_txs_query')
+    callback(null, txs)
+  })
+}
+
+var find_addresses_info = function (addresses, confirmations, callback) {
+  var transactions_conditions = !confirmations ? '1 = 1' : 'blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1)
+
+  var find_addresses_info_query = '' +
+    'SELECT\n' +
+    '  addressestransactions.address,\n' +
+    '  to_json(array_agg(transactions.*)) AS transactions\n' +
+    'FROM addressestransactions\n' +
+    'LEFT OUTER JOIN\n' +
+    '(' + get_find_transactions_query(transactions_conditions) + ') AS transactions ON transactions.txid = addressestransactions.txid\n' +
+    'WHERE\n' +
+    '  address IN ' + sql_builder.to_values(addresses) + '\n' +
+    'GROUP BY\n' +
+    '   address;'
+
+  sequelize.query(find_addresses_info_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (addresses_info) {
+      var results = {}
+      addresses_info.forEach(function (address_info) {
+        var utxos = []
+        var assets = {}
+        address_info.balance = 0
+        address_info.received = 0
+        results[address_info.address] = address_info
+        address_info.transactions.forEach(function (tx) {
+          tx.confirmations = properties.last_block - tx.blockheight + 1
+          if ('vout' in tx && tx.vout) {
+            tx.vout.forEach(function (vout) {
+              if ('scriptPubKey' in vout && vout.scriptPubKey) {
+                if ('addresses' in vout.scriptPubKey && vout.scriptPubKey.addresses && vout.scriptPubKey.addresses.indexOf(address_info.address) !== -1) {
+                  address_info.received += vout.value
+                  if (!vout.used) {
+                    vout.blockheight = tx.blockheight
+                    vout.blocktime = tx.blocktime
+                    utxos.push(vout)
+                  }
+                  if (vout.assets && vout.assets.length) {
+                    vout.assets.forEach(function (asset) {
+                      var assetId = asset.assetId
+                      assets[assetId] = assets[assetId] || {
+                        assetId: assetId,
+                        balance: 0,
+                        received: 0,
+                        divisibility: asset.divisibility,
+                        lockStatus: asset.lockStatus
+                      }
+                      assets[assetId].received += asset.amount
+                    })
+                  }
+                }
+              }
+            })
+          }
+        })
+
+        utxos.forEach(function (utxo) {
+          address_info.balance += utxo.value
+          utxo.assets = utxo.assets || []
+          utxo.assets.forEach(function (asset) {
+            var assetId = asset.assetId
+            assets[assetId] = assets[assetId] || {
+              assetId: assetId,
+              balance: 0,
+              received: 0,
+              divisibility: asset.divisibility,
+              lockStatus: asset.lockStatus
+            }
+            assets[assetId].balance += asset.amount
+          })
+        })
+
+        address_info.assets = []
+        for (var assetId in assets) {
+          address_info.assets.push(assets[assetId])
+        }
+        address_info.numOfTransactions = address_info.transactions.length
+      })
+
+      // filling missing addresses (not all addresses were necessarily in DB)
+      addresses.forEach(function (address) {
+        results[address] = results[address] || {
+          address: address,
+          balance: 0,
+          received: 0,
+          assets: [],
+          numOfTransactions: 0
+        }
+      })
+      callback(null, _.values(results))
+    })
+    .catch(callback)
+}
+
+var get_find_addresses_utxos_query = function (confirmations, addresses_condition) {
+  confirmations = confirmations || 0
+  return '' +
+    'SELECT\n' +
+    'addressesoutputs.address,\n' +
+    'outputs."n" AS index, outputs."used", outputs.txid, outputs."usedTxid", outputs."usedBlockheight", outputs."value", outputs."scriptPubKey",\n' +
+    'to_json(array(\n' +
+    '  SELECT assets FROM\n' +
+    '    (SELECT\n' +
+    '      assetsoutputs."assetId", assetsoutputs."amount", assetsoutputs."issueTxid",\n' +
+    '      assets.*\n' +
+    '    FROM\n' +
+    '      assetsoutputs\n' +
+    '    INNER JOIN assets ON assets."assetId" = assetsoutputs."assetId"\n' +
+    '    WHERE assetsoutputs.output_id = outputs.id ORDER BY index_in_output)\n' +
+    '    AS assets)) AS assets\n' +
+    'FROM\n' +
+    '  addressesoutputs\n' +
+    'LEFT OUTER JOIN outputs ON outputs.id = addressesoutputs.output_id\n' +
+    (confirmations ? 'INNER JOIN transactions ON transactions.txid = outputs.txid\n' : '') +
+    'WHERE outputs.used = FALSE AND ' + (confirmations ? '(transactions.blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1) + ') AND\n' : '') +
+    addresses_condition + ';'
+}
+
+var find_address_utxos = function (address, confirmations, callback) {
+  var query = get_find_addresses_utxos_query(confirmations, 'addressesoutputs.address = :address')
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {address: address}, logging: console.log, benchmark: true})
+    .then(function (utxos) {
+      var ans = {address: address, utxos: utxos}
+      return callback(null, ans)
+    })
+    .catch(callback)
+}
+
+var find_addresses_utxos = function (addresses, confirmations, callback) {
+  var query = get_find_addresses_utxos_query(confirmations, 'addressesoutputs.address IN ' + sql_builder.to_values(addresses))
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (utxos) {
+      var ans = _(utxos)
+        .groupBy('address')
+        .transform(function (result, utxos, address) {
+          result.push({address: address, utxos: utxos})
+        }, [])
+        .value()
+      return callback(null, ans)
+    })
+    .catch(callback)
+}
+
+var find_blocks = function (start, end, callback) {
+  start = start || 0
+  end = end || 0
+
+  start = parseInt(start, 10)
+  end = parseInt(end, 10)
+
+  if (typeof start !== 'number' || typeof end !== 'number') {
+    return callback('Arguments must be numbers.')
+  }
+  var conditions = {}
+  var include = [
+    {
+      model: Transactions,
+      as: 'transactions',
+      attributes: ['txid']
+    }
+  ]
+  var order = [
+    ['height', 'DESC'],
+    [{model: Transactions, as: 'transactions'}, 'index_in_block', 'ASC']
+  ]
+  var limit = MAX_BLOCKS_ALLOWED
+  if (start < 0 && !end) {
+    limit = -start
+    if (limit > MAX_BLOCKS_ALLOWED) {
+      return callback(new errors.BlocksRangeTooHighError({
+        explanation: 'Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.'
+      }))
+    }
+    conditions = {
+      ccparsed: true
+    }
+  } else {
+    if (end - start + 1 > MAX_BLOCKS_ALLOWED) {
+      return callback(new errors.BlocksRangeTooHighError({
+        explanation: 'Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.'
+      }))
+    }
+    conditions = {
+      height: {$gte: start, $lte: end},
+      ccparsed: true
+    }
+  }
+  Blocks.findAll({ where: conditions, include: include, order: order, limit: limit })
+    .then(function (blocks) {
+      blocks.forEach(function (block, i) {
+        blocks[i] = block.toJSON()
+        blocks[i].tx = _(blocks[i].transactions).map('txid').value()
+        delete blocks[i].transactions
+      })
+      callback(null, blocks)
+    })
+    .catch(callback)
+}
+
+var find_asset_holders = function (assetId, confirmations, callback) {
+  var find_asset_holders_query = '' +
+    'SELECT\n' +
+      'assetsoutputs.address,\n' +
+      'min(assetsoutputs.txid || \':\' || assetsoutputs.n) AS "someUtxo",\n' +
+      'min(assetsoutputs.divisibility) AS divisibility,\n' +
+      'min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",\n' +
+      'bool_or(assetsoutputs."lockStatus") AS "lockStatus",\n' +
+      'sum(assetsoutputs.amount) AS amount\n' +
+    'FROM\n' +
+    '  (SELECT\n' +
+    '    assets.*,\n' +
+    '    assetsoutputs.amount,\n' +
+    '    outputs.txid,\n' +
+    '    outputs.n,\n' +
+    '    jsonb_array_elements(outputs.addresses) AS address\n' +
+    '  FROM\n' +
+    '    assets\n' +
+    '  LEFT OUTER JOIN (\n' +
+    '    SELECT\n' +
+    '      assetsoutputs.output_id,\n' +
+    '      assetsoutputs."issueTxid",\n' +
+    '      assetsoutputs.amount,\n' +
+    '      assetsoutputs."assetId"\n' +
+    '    FROM\n' +
+    '      assetsoutputs\n' +
+    '  ) AS assetsoutputs ON assetsoutputs."assetId" = assets."assetId"\n' +
+    '  INNER JOIN (\n' +
+    '    SELECT\n' +
+    '      outputs.id,\n' +
+    '      outputs.txid,\n' +
+    '      outputs.n,\n' +
+    '      outputs."scriptPubKey"->\'addresses\' AS addresses\n' +
+    '    FROM\n' +
+    '      outputs\n' +
+    '    WHERE\n' +
+    '      outputs.used = FALSE\n' +
+    '  ) AS outputs ON outputs.id = assetsoutputs.output_id\n' +
+    (confirmations ?
+    '  INNER JOIN (\n' +
+    '    SELECT\n' +
+    '      transactions.txid,\n' +
+    '      transactions.blockheight\n' +
+    '    FROM\n' +
+    '      transactions\n' +
+    '    WHERE\n' +
+    '      blockheight BETWEEN 0 AND ' + (properties.last_block - confirmations + 1) + '\n' +
+    '  ) AS transactions ON transactions.txid = outputs.txid\n' : '') +
+    'WHERE\n' +
+    '  assets."assetId" = :assetId) AS assetsoutputs\n' +
+    'GROUP BY address;'
+
+  sequelize.query(find_asset_holders_query, {type: sequelize.QueryTypes.SELECT, replacements: {assetId: assetId}, logging: console.log, benchmark: true})
+    .then(function (holders) {
+      if (!holders.length) {
+        return callback(null, {
+          assetId: assetId,
+          holders: []
+        })
+      }
+      var ans = {}
+      ans.assetId = assetId
+      ans.someUtxo = holders[0].someUtxo
+      ans.divisibility = holders[0].divisibility
+      ans.lockStatus = holders[0].lockStatus
+      ans.aggregationPolicy = holders[0].aggregationPolicy
+      ans.holders = holders
+      ans.holders.forEach(function (holder) {
+        delete holder.someUtxo
+        delete holder.divisibility
+        delete holder.lockStatus
+        delete holder.aggregationPolicy
+      })
+      callback(null, ans)
+    })
+}
+
+var find_asset_info = function (assetId, options, callback) {
+  var utxo
+  var with_transactions
+  if (typeof options === 'function') {
+    callback = options
+    utxo = null
+    with_transactions = false
+  } else {
+    utxo = (options && options.utxo) || null
+    with_transactions = (options && options.with_transactions) === true
+  }
+
+  var find_asset_info_query = '' +
+    'SELECT\n' +
+    '  assetsoutputs."assetId",\n' +
+    (utxo ? '  min(CASE WHEN assetsoutputs.txid = :txid AND assetsoutputs.n = :n THEN assetsoutputs."issueTxid" ELSE NULL END) AS "issuanceTxid",\n' : '') +
+    '  min(CASE WHEN assetsoutputs.blockheight > -1 THEN assetsoutputs.blockheight ELSE NULL END) AS "firstBlock",\n' +
+    '  min(assetsoutputs.txid || \':\' || assetsoutputs.n) AS "someUtxo",\n' +
+    '  min(assetsoutputs.divisibility) AS divisibility,\n' +
+    '  min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",\n' +
+    '  bool_or(assetsoutputs."lockStatus") AS "lockStatus",\n' +
+    '  to_json(array_agg(holders) FILTER (WHERE used = false)) as holders,\n' +
+    (with_transactions ?
+    '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'transfer\')) AS "transfers",\n' +
+    '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'issuance\')) AS "issuances",\n' :
+    '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'issuance\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfIssuance",\n' +
+    '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'transfer\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfTransfers",\n') +
+    '  sum(CASE WHEN assetsoutputs.used = false THEN assetsoutputs.amount ELSE NULL END) AS "totalSupply"\n' +
+    'FROM\n' +
+    '  (SELECT\n' +
+    '    assets.*,\n' +
+    '    assetsoutputs.amount,\n' +
+    '    assetsoutputs."issueTxid",\n' +
+    '    outputs.txid,\n' +
+    '    outputs.n,\n' +
+    '    outputs.used,\n' +
+    '    json_build_object(\'addresses\', outputs.addresses, \'amount\', amount) AS holders,\n' +
+    '    transactions.blockheight,\n' +
+    '    transactions.type\n' +
+    '  FROM\n' +
+    '    assets\n' +
+    '  LEFT OUTER JOIN (\n' +
+    '    SELECT\n' +
+    '      assetsoutputs.output_id,\n' +
+    '      assetsoutputs."issueTxid",\n' +
+    '      assetsoutputs.amount,\n' +
+    '      assetsoutputs."assetId"\n' +
+    '    FROM\n' +
+    '      assetsoutputs\n' +
+    '    ) AS assetsoutputs ON assetsoutputs."assetId" = assets."assetId"\n' +
+    '  INNER JOIN (\n' +
+    '      SELECT\n' +
+    '        outputs.id,\n' +
+    '        outputs.used,\n' +
+    '        outputs.txid,\n' +
+    '        outputs.n,\n' +
+    '        outputs."scriptPubKey"->\'addresses\' AS addresses\n' +
+    '      FROM\n' +
+    '        outputs\n' +
+    '    ) AS outputs ON outputs.id = assetsoutputs.output_id\n' +
+    '  INNER JOIN (\n' +
+    '    SELECT\n' +
+    '      transactions.txid,\n' +
+    '      transactions.blockheight,\n' +
+    '      transactions.ccdata::JSON->0->>\'type\' AS type\n' +
+    '    FROM\n' +
+    '      transactions\n' +
+    '    ) AS transactions ON transactions.txid = outputs.txid) AS assetsoutputs\n' +
+    'WHERE\n' +
+    '  "assetId" = :assetId\n' +
+    'GROUP BY\n' +
+    '  "assetId"'
+
+  var replacements = {
+    assetId: assetId
+  }
+  if (utxo) {
+    var utxo_split = utxo.split(':')
+    replacements.txid = utxo_split[0]
+    replacements.n = utxo_split[1]
+  }
+
+  sequelize.query(find_asset_info_query, {replacements: replacements, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (asset_info) {
+      if (!asset_info || !asset_info.length) return callback(null, {
+        assetId: assetId,
+        totalSupply: 0,
+        numOfHolders: 0,
+        numOfTransfers: 0,
+        numOfIssuance: 0,
+        firstBlock: -1
+      })
+      asset_info = asset_info[0]
+      asset_info.firstBlock = asset_info.firstBlock || -1
+      var holders = {}
+      if (with_transactions) {
+        asset_info.numOfIssuances = asset_info.issuances.length
+        asset_info.numOfTransfers = asset_info.transfers.length
+      }
+      asset_info.holders.forEach(function (holder) {
+        holder.addresses.forEach(function (address) {
+          holders[address] = holders[address] || 0
+          holders[address] += holder.amount
+        })
+      })
+      asset_info.holders = Object.keys(holders).map(function (address) {
+        return {
+          address: address,
+          amount: holders[address]
+        }
+      })
+      asset_info.numOfHolders = asset_info.holders.length
+      callback(null, asset_info)
+    })
+    .catch(callback)
+}
+
+var find_asset_info_with_transactions = function (assetId, options, callback) {
+  find_asset_info(assetId, options, function (err, asset_info) {
+    if (err) return callback(err)
+    if (!asset_info) return callback()
+    async.parallel([
+      function (cb) {
+        find_transactions(asset_info.issuances, cb)
+      },
+      function (cb) {
+        find_transactions(asset_info.transfers, cb)
+      }
+    ],
+    function (err, results) {
+      if (err) return callback(err)
+      asset_info.issuances = results[0]
+      asset_info.transfers = results[1]
+      callback(null, asset_info)
     })
   })
 }
 
-var get_asset_holders = function (req, res, next) {
-  var params = req.data
-  var assetId = params.assetId
-  var confirmations = params.confirmations || 0
-  confirmations = parseInt(confirmations, 10)
+var find_popular_assets = function (sort_by, limit, callback) {
+  var table_name
+  if (sort_by === 'transactions') {
+    table_name = 'assetstransactions'
+  } else if (sort_by === 'holders') {
+    table_name = 'assetsaddresses'
+  } else {
+    table_name = 'assetstransactions'
+  }
 
-  find_asset_holders(assetId, confirmations, function (err, holders) {
-    if (err) return next(err)
-    return res.send(holders)
+  var query = '' +
+    'SELECT' +
+    '  "assetId", count(*) AS count\n' +
+    'FROM\n' +
+    '  ' + table_name + '\n' +
+    'GROUP BY\n' +
+    '  "assetId"\n' +
+    'ORDER BY\n' +
+    '  count DESC\n' +
+    'LIMIT :limit'
+
+  sequelize.query(query, {replacements: {limit: limit}, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (assets) {
+      async.map(assets, function (asset, cb) {
+        find_asset_info(asset.assetId, function (err, info) {
+          if (err) return cb(err)
+          if ('holders' in info) delete info['holders']
+          cb(null, info)
+        })
+      },
+      function (err, results) {
+        callback(err, results)
+      })
+    })
+    .catch(callback)
+}
+
+var get_find_utxos_query = function (outputs_conditions) {
+  return '' +
+    'SELECT\n' +
+    '  outputs."n" AS index, outputs."used", outputs.txid, outputs."usedTxid", outputs."usedBlockheight", outputs."value", outputs."scriptPubKey",\n' +
+    '  transactions.blockheight, transactions.blocktime,\n' +
+    '  to_json(array(\n' +
+    '    SELECT\n' +
+    '      assets\n' +
+    '    FROM\n' +
+    '      (SELECT\n' +
+    '        assetsoutputs.output_id, assetsoutputs.amount, assetsoutputs."issueTxid",\n' +
+    '        assets.*\n' +
+    '      FROM\n' +
+    '        assetsoutputs\n' +
+    '      INNER JOIN assets ON assetsoutputs."assetId" = assets."assetId"\n' +
+    '      WHERE\n' +
+    '        assetsoutputs.output_id = outputs.id) AS assets)) AS assets\n' +
+    'FROM\n' +
+    '  outputs\n' +
+    'INNER JOIN transactions ON transactions.txid = outputs.txid\n' +
+    'WHERE\n' +
+    '  ' + outputs_conditions
+}
+
+var find_utxo = function (txid, index, callback) {
+  var output_condition = 'outputs.txid = :txid AND outputs.n = :n'
+  var query = get_find_utxos_query(output_condition)
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, replacements: {txid: txid, n: index}, logging: console.log, benchmark: true})
+    .then(function (utxos) {
+      callback(null, utxos[0])
+    })
+    .catch(callback)
+}
+
+var find_utxos = function (utxos, callback) {
+  if (!utxos || !utxos.length) return callback(null, [])
+  var or = utxos.map(function (utxo) {
+    return {'outputs.txid': utxo.txid, n: utxo.index}
+  })
+  var outputs_conditions = sql_builder.to_conditions(or)
+  var query = get_find_utxos_query(outputs_conditions)
+  sequelize.query(query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (utxos) {
+      callback(null, utxos)
+    })
+    .catch(callback)
+}
+
+var is_asset = function (assetId, callback) {
+  Assets.findOne({where: {assetId: assetId}, raw: true})
+    .then(function (asset) { callback(null, !!asset) })
+    .catch(callback)
+}
+
+var find_mempool_txids = function (colored, callback) {
+  var conditions = {
+    blockheight: -1
+  }
+  if (colored) {
+    conditions.colored = true
+  }
+  var attributes = ['txid']
+  Transactions.findAll({where: conditions, attributes: attributes, raw: true, logging: console.log, benchmark: true})
+    .then(function (transactions) {
+      callback(null, transactions.map(function (tx) { return tx.txid }))
+    })
+    .catch(callback)
+}
+
+var find_info = function (callback) {
+  scanner.get_info(function (err, info) {
+    if (err) return callback(err)
+    delete info.balance
+    info.mempool = global.mempool
+    find_last_blocks(function (err, blocks) {
+      if (err) return callback(err)
+      info.parsedblocks = blocks.last_parsed_block
+      info.fixedblocks = blocks.last_fixed_block
+      info.ccparsedblocks = blocks.last_cc_parsed_block
+      info.timeStamp = new Date()
+      callback(null, info)
+    })
   })
 }
 
-var get_blocks = function (req, res, next) {
-  var params = req.data
-  var start = params.start
-  var end = params.end
-  find_blocks(start, end, function (err, blocks) {
-    if (err) return next(err)
-    return res.send(blocks)
-  })
+var find_last_parsed_block = function (callback) {
+  var conditions = {
+    txsinserted: true
+  }
+  var attributes = ['height']
+  var order = [['height', 'DESC']]
+  Blocks.findOne({where: conditions, attributes: attributes, order: order, raw: true, logging: console.log, benchmark: true})
+    .then(function (block_data) {
+      if (!block_data) return callback(null, -1)
+      callback(null, block_data.height)
+    })
+    .catch(callback)
 }
 
-var get_block_with_transactions = function (req, res, next) {
-  var params = req.data
-  var height_or_hash = params.height_or_hash
-  var colored = params.colored
+var find_last_fixed_block = function (callback) {
+  var conditions = {
+    txsinserted: true,
+    txsparsed: true
+  }
+  var attributes = ['height']
+  var order = [['height', 'DESC']]
+  Blocks.findOne({where: conditions, attributes: attributes, order: order, raw: true, logging: console.log, benchmark: true})
+    .then(function (block_data) {
+      if (!block_data) return callback(null, -1)
+      callback(null, block_data.height)
+    })
+    .catch(callback)
+}
 
-  find_block_with_transactions(height_or_hash, colored, function (err, block) {
-    if (err) return next(err)
-    return res.send(block)
-  })
+var find_last_cc_parsed_block = function (callback) {
+  var conditions = {
+    txsinserted: true,
+    txsparsed: true,
+    ccparsed: true
+  }
+  var attributes = ['height']
+  var order = [['height', 'DESC']]
+  Blocks.findOne({where: conditions, attributes: attributes, order: order, raw: true, logging: console.log, benchmark: true})
+    .then(function (block_data) {
+      if (!block_data) return callback(null, -1)
+      callback(null, block_data.height)
+    })
+    .catch(callback)
+}
+
+var find_last_blocks = function (callback) {
+  async.parallel({
+    last_parsed_block: find_last_parsed_block,
+    last_fixed_block: find_last_fixed_block,
+    last_cc_parsed_block: find_last_cc_parsed_block
+  },
+  callback)
 }
 
 var is_active = function (req, res, next) {
   var params = req.data
   var addresses = params.addresses
   if (!addresses || !Array.isArray(addresses)) return next('addresses should be array')
-  var match = {
-    address: {
-      $in: addresses
-    }
-  }
-  var group = {
-    _id: "$address"
-  }
-  var project = {
-    address: "$_id",
-    _id: 0
-  }
-
-  AddressesTransactions.aggregate( 
-    {$match   : match}, 
-    {$group   : group},
-    {$project : project}
-  ).exec(function (err, active_addresses) {
-    if (err) return next(err)
-    var ans = addresses.map(function (address) {
-      var found = false
-      active_addresses.forEach(function (active_address) {
-        if (!found && active_address.address === address) {
-          found = true
+  var is_active_query = '' +
+    'SELECT DISTINCT\n' +
+    '  addressestransactions.address\n' +
+    'FROM\n' +
+    '  addressestransactions\n' +
+    'WHERE\n' +
+    '  address IN ' + sql_builder.to_values(addresses) + ';'
+  sequelize.query(is_active_query, {type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
+    .then(function (active_addresses) {
+      active_addresses = _.reduce(active_addresses, function (result, obj) {
+        result[obj.address] = true
+        return result
+      }, {})
+      var ans = addresses.map(function (address) {
+        return {
+          address: address,
+          active: active_addresses[address] || false
         }
       })
-      return {
-        address: address,
-        active: found
-      }
+      res.send(ans)
     })
-    res.send(ans)
-  })
+    .catch(next)
 }
 
 var transmit = function (req, res, next) {
@@ -1303,27 +1254,27 @@ var transmit = function (req, res, next) {
 }
 
 module.exports = {
+  get_transaction: get_transaction,
   get_block: get_block,
   get_block_with_transactions: get_block_with_transactions,
-  get_transaction: get_transaction,
+  get_blocks: get_blocks,
+  get_address_utxos: get_address_utxos,
+  get_addresses_utxos: get_addresses_utxos,
+  get_asset_info: get_asset_info,
+  get_asset_info_with_transactions: get_asset_info_with_transactions,
+  get_asset_holders: get_asset_holders,
+  get_transactions_by_intervals: get_transactions_by_intervals,
+  get_main_stats: get_main_stats,
+  search: search,
+  parse_tx: parse_tx,
+  get_utxo: get_utxo,
+  get_utxos: get_utxos,
   get_address_info: get_address_info,
   get_address_info_with_transactions: get_address_info_with_transactions,
   get_addresses_info: get_addresses_info,
   get_addresses_info_with_transactions: get_addresses_info_with_transactions,
-  get_asset_info: get_asset_info,
-  get_asset_info_with_transactions: get_asset_info_with_transactions,
-  get_address_utxos: get_address_utxos,
-  get_addresses_utxos: get_addresses_utxos,
-  search: search,
-  get_blocks: get_blocks,
-  get_asset_holders: get_asset_holders,
-  get_transactions_by_intervals: get_transactions_by_intervals,
-  get_main_stats: get_main_stats,
   get_cc_transactions: get_cc_transactions,
   get_popular_assets: get_popular_assets,
-  parse_tx: parse_tx,
-  get_utxo: get_utxo,
-  get_utxos: get_utxos,
   get_mempool_txids: get_mempool_txids,
   get_info: get_info,
   is_active: is_active,
