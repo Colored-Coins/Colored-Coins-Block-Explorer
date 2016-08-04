@@ -1,3 +1,4 @@
+var expressValidator = require('express-validator')
 var validator = require('validator')
 var cs = require('coinstring')
 var bs58 = require('bs58')
@@ -6,7 +7,8 @@ var ecurve = require('ecurve')
 var libphonenumber = require('google-libphonenumber')
 var phoneUtils = libphonenumber.PhoneNumberUtil.getInstance()
 
-var hash_array = [{
+var hash_array = [
+  {
     name: 'bitcoin',
     value: 0x00
   }, {
@@ -38,38 +40,6 @@ var assetid_prefixes = [{
   value: 0x8e
 }]
 
-var enckey_prefixes = [{
-  name: 'ec',
-  value: 0x0142
-}, {
-  name: 'no-ec',
-  value: 0x0143
-}]
-
-var extpubkey_prefixes = [{
-  name: 'mainnet',
-  value: 0x0488B21E
-}, {
-  name: 'testnet',
-  value: 0x043587CF
-}]
-
-validator.isObject = function (array) {
-  if (typeof array === 'string') {
-    try {
-      JSON.parse(array)
-      return true
-    } catch (e) {
-      return false
-    }
-  }
-  return typeof array === 'object'
-}
-
-validator.isString = function (str) {
-  return typeof str === 'string'
-}
-
 validator.isCryptoAddress = function (address) {
   var result = false
   if (typeof address === 'string') address = [address]
@@ -83,41 +53,14 @@ validator.isCryptoAddress = function (address) {
   return result
 }
 
-validator.isPubKey = function (pubkey) {
-  if (!Buffer.isBuffer(pubkey)) {
-    try {
-      if (pubkey.length === 66 || pubkey.length === 130) {
-        pubkey = new Buffer(pubkey, 'hex')
-      } else {
-        return false
-      }
-    } catch (error) {
+validator.isCryptoAddresses = function (addresses) {
+  if (!Array.isArray(addresses)) return false
+  for (var i = 0; i < addresses.length; i++) {
+    if (!validator.isCryptoAddress(addresses[i])) {
       return false
     }
   }
-  try {
-    ecurve.Point.decodeFrom(ecurve.getCurveByName('secp256k1'), pubkey)
-  } catch (e) {
-    return false
-  }
   return true
-}
-
-validator.isExtendedPubKey = function (str) {
-  try {
-    var buf = bs58.decode(str)
-    var new_buf = new Buffer(buf)
-    var hex = new_buf.toString('hex')[0] + new_buf.toString('hex')[1] + new_buf.toString('hex')[2] + new_buf.toString('hex')[3] + new_buf.toString('hex')[4] + new_buf.toString('hex')[5] + new_buf.toString('hex')[6] + new_buf.toString('hex')[7]
-    var prefix_int = parseInt(hex, 16)
-    for (var i in extpubkey_prefixes) {
-      if (prefix_int === extpubkey_prefixes[i].value) {
-        return true
-      }
-    }
-  } catch (e) {
-    return false
-  }
-  return false
 }
 
 validator.isHexInLength = function (str, num) {
@@ -133,26 +76,6 @@ validator.isHexInLength32 = function (str) {
 
 validator.isHexInLength64 = function (str) {
   return validator.isHexInLength(str, 64)
-}
-
-validator.isEncKey = function (str) {
-  try {
-    var buf = bs58.decode(str)
-    var new_buf = new Buffer(buf)
-    var prefix_int = parseInt(new_buf.toString('hex')[0] + new_buf.toString('hex')[1] + new_buf.toString('hex')[2] + new_buf.toString('hex')[3], 16)
-    for (var i in enckey_prefixes) {
-      if (prefix_int === enckey_prefixes[i].value) {
-        return true
-      }
-    }
-  } catch (e) {
-    return false
-  }
-  return false
-}
-
-validator.isRandomCode = function (num) {
-  return validator.isNumeric(num) && num.toString().split('').length === 4
 }
 
 validator.isAssetId = function (str) {
@@ -174,58 +97,55 @@ validator.isAssetId = function (str) {
   return ans
 }
 
-validator.isDER = function (str) {
-  try {
-    ecdsa.parseSig(new Buffer(str, 'base64'))
-  } catch (e) {
-    return false
+validator.isUtxo = function (utxo) {
+  if (typeof utxo !== 'string') return false
+  var utxoParts = utxo.split(':')
+  if (utxoParts.length !== 2) return false
+  return validateUtxoParts(utxoParts)
+}
+
+var validateUtxoParts = function (utxoParts) {
+  return validator.isHexInLength64(utxoParts[0]) && validator.isNumeric(utxoParts[1])
+}
+
+validator.isUtxos = function (utxos) {
+  if (!Array.isArray(utxos)) return false
+  for (var i = 0; i < utxos.length; i++) {
+    if (typeof utxos[i].txid === 'undefined' || typeof utxos[i].index === 'undefined' || !validateUtxoParts([utxos[i].txid, utxos[i].index])) {
+      return false
+    }
   }
   return true
 }
 
-validator.isPhone = function (str) {
-  var num
-  if (str[0] !== '+') str = '+' + str
-  try {
-    num = phoneUtils.parse(str)
-    return !!num.getCountryCode()
-  } catch (e) {
-    return false
-  }
+var isV0 = function (url) {
+  return !url.match(/\/v\d\//)
 }
 
-validator.isEmailList = function (str) {
-  var result = true
-  try {
-    var arr = str.split(',')
-    if (arr.length <= 0) return false
-    arr.forEach(function (email) {
-      if (!validator.isEmail(email)) {
-        result = false
-      }
-    })
-    return result
-  } catch (e) {
-    return false
+module.exports = function (req, res, next) {
+  if (isV0(req.originalUrl)) {
+    return next()
   }
-}
 
-module.exports = {
-  height_or_hash: function () { return true },
-  colored: function () { return true },
-  txid: function () { return true },
-  address: function () { return true },
-  confirmations: function () { return true },
-  assetId: function () { return true },
-  utxo: function () { return true },
-  sortBy: function () { return true },
-  limit: function () { return true },
-  start: function () { return true },
-  end: function () { return true },
-  interval: function () { return true },
-  arg: function () { return true },
-  index: function () { return true },
-  addresses: function () { return true },
-  utxos: function () { return true },
-  txHex: function () { return true }
+  return expressValidator({
+    customValidators: {
+      height_or_hash: function (height_or_hash) {
+        return validator.isHexInLength64(height_or_hash) || validator.isNumeric(height_or_hash)
+      },
+      colored: validator.isBoolean,
+      txid: validator.isHexInLength64,
+      address: validator.isCryptoAddress,
+      confirmations: validator.isNumeric,
+      assetId: validator.isAssetId,
+      utxo: validator.isUtxo,
+      limit: validator.isNumeric,
+      start: validator.isNumeric,
+      end: validator.isNumeric,
+      interval: validator.isNumeric,
+      arg: function () { return true },
+      index: validator.isNumeric,
+      addresses: validator.isCryptoAddresses,
+      utxos: validator.isUtxos
+    }
+  })(req, res, next)
 }
