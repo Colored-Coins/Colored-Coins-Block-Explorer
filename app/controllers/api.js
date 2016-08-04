@@ -2,6 +2,7 @@ var bitcoin = require('bitcoinjs-lib')
 var async = require('async')
 var moment = require('moment')
 var Cache = require('ttl')
+var errors = require('cc-errors')
 
 var casimir = global.casimir
 var properties = casimir.properties
@@ -440,14 +441,18 @@ var find_blocks = function (start, end, callback) {
   if (start < 0 && !end) {
     limit = -start
     if (limit > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more then ' + MAX_BLOCKS_ALLOWED + ' blocks.')
+      return callback(new errors.BlocksRangeTooHighError({
+        explanation: 'Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.'
+      }))
     }
     conditions = {
       ccparsed: true
     }
   } else {
     if (end - start + 1 > MAX_BLOCKS_ALLOWED) {
-      return callback('Can\'t query more then ' + MAX_BLOCKS_ALLOWED + ' blocks.')
+      return callback(new errors.BlocksRangeTooHighError({
+        explanation: 'Can\'t query more than ' + MAX_BLOCKS_ALLOWED + ' blocks.'
+      }))
     }
     conditions = {
       height: {$gte: start, $lte: end},
@@ -646,7 +651,7 @@ var find_transactions_by_intervals = function (assetId, start, end, interval, ca
   end = Math.round(end)
   interval = Math.round(interval)
 
-  if (Math.round((end - start) / interval) > 1000) return callback(['Sample resolution to high.', 500])
+  if (Math.round((end - start) / interval) > 1000) return callback(new errors.ResolutionTooHighError())
 
   var conditions = {
 
