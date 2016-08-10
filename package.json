@@ -8,7 +8,7 @@
     "bitcoin-async": "^1.0.0",
     "bitcoinjs-lib": "^1.5.6",
     "bs58": "^3.0.0",
-    "casimircore": "git+https://github.com/Colored-Coins/casimircore.git#sql_error_management",
+    "casimircore": "git+https://github.com/Colored-Coins/casimircore.git#postgres",
     "cc-block-parser": "git+https://github.com/Colored-Coins/Parser.git#sql",
     "sequelize": "^3.19.3",
     "squel": "^5.0.3",
