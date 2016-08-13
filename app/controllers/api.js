@@ -606,7 +606,7 @@ var find_cc_transactions = function (skip, limit, callback) {
       console.timeEnd('find_cc_transactions count_mempool_cc_txs_query')
       console.time('find_cc_transactions find_latest_confirmed_cc_txs_query')
       if (!limit) return cb()
-      var find_latest_confirmed_cc_txs_query = get_find_transactions_query('ccparsed = TRUE AND colored = TRUE AND blockheight > 0') + '\n' +
+      var find_latest_confirmed_cc_txs_query = get_find_transactions_query('ccparsed = TRUE'/* AND colored = TRUE AND blockheight > 0'*/) + '\n' +
         'ORDER BY\n' +
         '  blockheight DESC\n' +
         'LIMIT ' + limit + '\n' +
