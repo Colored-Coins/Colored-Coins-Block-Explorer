@@ -645,7 +645,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
     .then(function (addresses_info) {
       var results = {}
       addresses_info.forEach(function (address_info) {
-        var utxos = []
+        var utxos = address_info.utxos = []
         var assets = {}
         address_info.balance = 0
         address_info.received = 0
