@@ -922,10 +922,10 @@ var find_asset_info = function (assetId, options, callback) {
     '  min(assetsoutputs.divisibility) AS divisibility,\n' +
     '  min(assetsoutputs."aggregationPolicy") AS "aggregationPolicy",\n' +
     '  bool_or(assetsoutputs."lockStatus") AS "lockStatus",\n' +
-    '  to_json(array_agg(holders) FILTER (WHERE used = false)) as holders,\n' +
+    '  COALESCE(to_json(array_agg(holders) FILTER (WHERE used = false)), \'[]\') as holders,\n' +
     (with_transactions ?
-    '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'transfer\')) AS "transfers",\n' +
-    '  to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'issuance\')) AS "issuances",\n' :
+    '  COALESCE(to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'transfer\')), \'[]\') AS "transfers",\n' +
+    '  COALESCE(to_json(array_agg(DISTINCT (assetsoutputs.txid)) FILTER (WHERE assetsoutputs.txid IS NOT NULL AND assetsoutputs.type = \'issuance\')), \'[]\') AS "issuances",\n' :
     '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'issuance\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfIssuance",\n' +
     '  count(DISTINCT (CASE WHEN assetsoutputs.type = \'transfer\' THEN assetsoutputs.txid ELSE NULL END)) AS "numOfTransfers",\n') +
     '  sum(CASE WHEN assetsoutputs.used = false THEN assetsoutputs.amount ELSE NULL END) AS "totalSupply"\n' +
@@ -985,14 +985,21 @@ var find_asset_info = function (assetId, options, callback) {
 
   sequelize.query(find_asset_info_query, {replacements: replacements, type: sequelize.QueryTypes.SELECT, logging: console.log, benchmark: true})
     .then(function (asset_info) {
-      if (!asset_info || !asset_info.length) return callback(null, {
-        assetId: assetId,
-        totalSupply: 0,
-        numOfHolders: 0,
-        numOfTransfers: 0,
-        numOfIssuance: 0,
-        firstBlock: -1
-      })
+      if (!asset_info || !asset_info.length) {
+        asset_info = {
+          assetId: assetId,
+          totalSupply: 0,
+          numOfHolders: 0,
+          numOfTransfers: 0,
+          numOfIssuance: 0,
+          firstBlock: -1
+        }
+        if (with_transactions) {
+          asset_info.issuances = []
+          asset_info.transfers = []
+        }
+        return callback(null, asset_info)
+      }
       asset_info = asset_info[0]
       asset_info.firstBlock = asset_info.firstBlock || -1
       var holders = {}
@@ -1024,9 +1031,11 @@ var find_asset_info_with_transactions = function (assetId, options, callback) {
     if (!asset_info) return callback()
     async.parallel([
       function (cb) {
+        if (!asset_info.issuances || !asset_info.issuances.length) return cb(null, [])
         find_transactions(asset_info.issuances, cb)
       },
       function (cb) {
+        if (!asset_info.transfers || !asset_info.transfers.length) return cb(null, [])
         find_transactions(asset_info.transfers, cb)
       }
     ],
