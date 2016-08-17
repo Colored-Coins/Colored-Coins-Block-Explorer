@@ -32,13 +32,18 @@ var hash_array = [
   }
 ]
 
-var assetid_prefixes = [{
-  name: 'locked',
-  value: 0xc8
-}, {
-  name: 'unlocked',
-  value: 0x8e
-}]
+var assetid_prefixes = [
+  {
+    name: 'unlocked',
+    value: 0x2e
+  }, {
+    name: 'locked1',
+    value: 0x20
+  }, {
+    name: 'locked2',
+    value: 0x21
+  }
+]
 
 validator.isCryptoAddress = function (address) {
   var result = false
