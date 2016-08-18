@@ -33,14 +33,14 @@ Sockets.prototype.open_channels = function () {
           if (process.env.ROLE === properties.roles.API) {
 
             self.io.local.emit(channel, msg)
-          } else if (self.bus && process.env.ROLE === properties.roles.SCANNER) {
+          } else if (self.bus) {
             self.bus.push({message: msg}, self.channel_prefix + '.' + channel, true)
           }
         }
         if (process.env.ROLE === properties.roles.API) {
           self.events.to(channel).local.emit(channel, msg) // if the scanner is paralelize then the local flag should be false
         } else {
-          if (self.bus && process.env.ROLE === properties.roles.SCANNER) {
+          if (self.bus) {
             self.bus.push({message: msg}, self.channel_prefix + '.' + channel, true)
           }
         }
@@ -54,7 +54,7 @@ Sockets.prototype.open_channels = function () {
     }
     if (process.env.ROLE === properties.roles.API) {
       self.events.to('transaction/' + transaction.txid).local.emit('transaction', msg)
-    } else if (self.bus && process.env.ROLE === properties.roles.SCANNER) {
+    } else if (self.bus) {
       self.bus.push({message: msg}, self.channel_prefix + '.transaction.' + transaction.txid, true)
     }
     var assets = []
@@ -108,7 +108,7 @@ Sockets.prototype.open_channels = function () {
       }
       if (process.env.ROLE === properties.roles.API) {
         self.events.to('address/' + address).local.emit('transaction', msg)
-      } else if (self.bus && process.env.ROLE === properties.roles.SCANNER) {
+      } else if (self.bus) {
         self.bus.push({message: msg}, self.channel_prefix + '.address.' + address, true)
       }
     })
@@ -121,7 +121,7 @@ Sockets.prototype.open_channels = function () {
       }
       if (process.env.ROLE === properties.roles.API) {
         self.events.to('asset/' + assetId).local.emit('transaction', msg)
-      } else if (self.bus && process.env.ROLE === properties.roles.SCANNER) {
+      } else if (self.bus) {
         self.bus.push({message: msg}, self.channel_prefix + '.asset.' + assetId, true)
       }
     })
