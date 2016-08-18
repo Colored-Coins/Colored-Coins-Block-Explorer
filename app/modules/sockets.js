@@ -1,14 +1,21 @@
 var casimir = global.casimir
+var properties = casimir.properties
 var logger = casimir.logger
 
 var channels = ['newblock', 'newtransaction', 'newcctransaction', 'revertedblock', 'revertedtransaction', 'revertedcctransaction']
 
-var Sockets = function (io, scanner) {
+var Sockets = function (opt) {
   var self = this
 
-  self.io = io
-  self.events = io.of('/events')
-  self.scanner = scanner
+  self.io = opt.io
+  self.bus = opt.bus
+  self.channel_prefix = opt.channel_prefix
+  var index = self.channel_prefix.indexOf('.*')
+  if (~index) {
+    self.channel_prefix = self.channel_prefix.substring(0, index)
+  }
+  self.events = self.io.of('/events')
+  self.scanner = opt.scanner
   self.on_address_sockets = {}
   self.on_trasaction_socket = {}
   self.open_socket()
@@ -23,9 +30,20 @@ Sockets.prototype.open_channels = function () {
         var msg = {}
         msg[channel] = data
         if (casimir.properties.sockets && casimir.properties.sockets.all_channels === 'true') {
-          self.io.local.emit(channel, msg)
+          if (process.env.ROLE === properties.roles.API) {
+
+            self.io.local.emit(channel, msg)
+          } else if (self.bus) {
+            self.bus.push({message: msg}, self.channel_prefix + '.' + channel, true)
+          }
         }
-        self.events.to(channel).local.emit(channel, msg) // if the scanner is paralelize then the local flag should be false
+        if (process.env.ROLE === properties.roles.API) {
+          self.events.to(channel).local.emit(channel, msg) // if the scanner is paralelize then the local flag should be false
+        } else {
+          if (self.bus) {
+            self.bus.push({message: msg}, self.channel_prefix + '.' + channel, true)
+          }
+        }
       })
     })
   }
@@ -34,7 +52,11 @@ Sockets.prototype.open_channels = function () {
       txid: transaction.txid,
       transaction: transaction
     }
-    self.events.to('transaction/' + transaction.txid).local.emit('transaction', msg)
+    if (process.env.ROLE === properties.roles.API) {
+      self.events.to('transaction/' + transaction.txid).local.emit('transaction', msg)
+    } else if (self.bus) {
+      self.bus.push({message: msg}, self.channel_prefix + '.transaction.' + transaction.txid, true)
+    }
     var assets = []
     var addresses = []
     // logger.debug('txid:', transaction.txid)
@@ -84,7 +106,11 @@ Sockets.prototype.open_channels = function () {
         address: address,
         transaction: transaction
       }
-      self.events.to('address/' + address).local.emit('transaction', msg)
+      if (process.env.ROLE === properties.roles.API) {
+        self.events.to('address/' + address).local.emit('transaction', msg)
+      } else if (self.bus) {
+        self.bus.push({message: msg}, self.channel_prefix + '.address.' + address, true)
+      }
     })
 
     assets.forEach(function (assetId) {
@@ -93,7 +119,11 @@ Sockets.prototype.open_channels = function () {
         assetId: assetId,
         transaction: transaction
       }
-      self.events.to('asset/' + assetId).local.emit('transaction', msg)
+      if (process.env.ROLE === properties.roles.API) {
+        self.events.to('asset/' + assetId).local.emit('transaction', msg)
+      } else if (self.bus) {
+        self.bus.push({message: msg}, self.channel_prefix + '.asset.' + assetId, true)
+      }
     })
   })
 }

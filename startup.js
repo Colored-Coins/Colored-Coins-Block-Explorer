@@ -1,5 +1,11 @@
 var mongoose = require('mongoose')
 var async = require('async')
+var pubsub
+try {
+  pubsub = require('fw_pubsub')
+} catch (e) {
+  console.error('no pubsub', e)
+}
 
 var casimir = global.casimir
 var server = casimir.server
@@ -11,6 +17,12 @@ properties.scanner.scan = process.env.SCAN || properties.scanner && properties.s
 properties.scanner.mempool = process.env.MEMPOOL || properties.scanner && properties.scanner.mempool
 properties.scanner.mempool_only = process.env.MEMPOOLONLY || properties.scanner && properties.scanner.mempool_only
 properties.sockets.all_channels = process.env.ALLCHANNELS || properties.sockets.all_channels
+
+properties.bus = properties.bus || {}
+properties.bus.redis = process.env.BUS_REDIS || properties.bus.redis
+properties.bus.channel = process.env.BUS_CHANNEL || properties.bus.channel
+properties.bus.mongodb = process.env.BUS_MONGODB || properties.bus.mongodb
+properties.bus.timer = parseInt(process.env.BUS_TIMER || properties.bus.timer || '0')
 
 var Sockets = require('./app/modules/sockets.js')
 var Scanner = require('cc-block-parser')
@@ -92,7 +104,24 @@ async.waterfall([
       }
     }
     casimir.scanner = scanner = new Scanner(settings, mongoose)
-    if (process.env.ROLE === properties.roles.API) casimir.sockets = new Sockets(casimir.server.io_server, scanner)
+    if (pubsub && process.env.ROLE === properties.roles.SCANNER) {
+      casimir.bus = new pubsub.PBus(properties.bus)
+      casimir.bus.on('ready', function() {
+        callback()
+      })
+      casimir.bus.create()
+    } else {
+      callback()
+    }
+  },
+  function (callback) {
+    var opts = {
+      io: casimir.server.io_server,
+      scanner: scanner,
+      bus: casimir.bus,
+      channel_prefix: properties.bus.channel
+    }
+    casimir.sockets = new Sockets(opts)
     if (properties.scanner.scan === 'true' && properties.scanner.mempool_only !== 'true') {
       if (process.env.ROLE === properties.roles.SCANNER) scanner.scan_blocks()
       if (process.env.ROLE === properties.roles.FIXER) scanner.fix_blocks()
