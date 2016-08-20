@@ -708,6 +708,8 @@ var find_addresses_info = function (addresses, confirmations, callback) {
       addresses.forEach(function (address) {
         results[address] = results[address] || {
           address: address,
+          transactions: [],
+          utxos: [],
           balance: 0,
           received: 0,
           assets: [],
