@@ -34,14 +34,14 @@ Sockets.prototype.open_channels = function () {
 
             self.io.local.emit(channel, msg)
           } else if (self.bus) {
-            self.bus.push({message: msg}, self.channel_prefix + '.' + channel, true)
+            self.bus.push({message: msg}, self.channel_prefix + '.' + channel, properties.bus.ttl)
           }
         }
         if (process.env.ROLE === properties.roles.API) {
           self.events.to(channel).local.emit(channel, msg) // if the scanner is paralelize then the local flag should be false
         } else {
           if (self.bus) {
-            self.bus.push({message: msg}, self.channel_prefix + '.' + channel, true)
+            self.bus.push({message: msg}, self.channel_prefix + '.' + channel, properties.bus.ttl)
           }
         }
       })
@@ -55,7 +55,7 @@ Sockets.prototype.open_channels = function () {
     if (process.env.ROLE === properties.roles.API) {
       self.events.to('transaction/' + transaction.txid).local.emit('transaction', msg)
     } else if (self.bus) {
-      self.bus.push({message: msg}, self.channel_prefix + '.transaction.' + transaction.txid, true)
+      self.bus.push({message: msg}, self.channel_prefix + '.transaction.' + transaction.txid, properties.bus.ttl)
     }
     var assets = []
     var addresses = []
@@ -109,7 +109,7 @@ Sockets.prototype.open_channels = function () {
       if (process.env.ROLE === properties.roles.API) {
         self.events.to('address/' + address).local.emit('transaction', msg)
       } else if (self.bus) {
-        self.bus.push({message: msg}, self.channel_prefix + '.address.' + address, true)
+        self.bus.push({message: msg}, self.channel_prefix + '.address.' + address, properties.bus.ttl)
       }
     })
 
@@ -122,7 +122,7 @@ Sockets.prototype.open_channels = function () {
       if (process.env.ROLE === properties.roles.API) {
         self.events.to('asset/' + assetId).local.emit('transaction', msg)
       } else if (self.bus) {
-        self.bus.push({message: msg}, self.channel_prefix + '.asset.' + assetId, true)
+        self.bus.push({message: msg}, self.channel_prefix + '.asset.' + assetId, properties.bus.ttl)
       }
     })
   })

@@ -23,6 +23,7 @@ properties.bus.redis = process.env.BUS_REDIS || properties.bus.redis
 properties.bus.channel = process.env.BUS_CHANNEL || properties.bus.channel
 properties.bus.mongodb = process.env.BUS_MONGODB || properties.bus.mongodb
 properties.bus.timer = parseInt(process.env.BUS_TIMER || properties.bus.timer || '0')
+properties.bus.ttl = parseInt(process.env.BUS_TTL || properties.bus.ttl || '315360000000') // 1000 * 60 * 60 * 24 * 365 * 10
 
 var Sockets = require('./app/modules/sockets.js')
 var Scanner = require('cc-block-parser')
