@@ -23,7 +23,8 @@ properties.bus.redis = process.env.BUS_REDIS || properties.bus.redis
 properties.bus.channel = process.env.BUS_CHANNEL || properties.bus.channel
 properties.bus.mongodb = process.env.BUS_MONGODB || properties.bus.mongodb
 properties.bus.timer = parseInt(process.env.BUS_TIMER || properties.bus.timer || '0')
-properties.bus.ttl = parseInt(process.env.BUS_TTL || properties.bus.ttl || '315360000000') // 1000 * 60 * 60 * 24 * 365 * 10
+properties.bus.short_ttl = parseInt(process.env.BUS_SHORT_TTL || properties.bus.short_ttl || '604800000') // 1000 * 60 * 60 * 24 * 7 (week)
+properties.bus.long_ttl = parseInt(process.env.BUS_LONG_TTL || properties.bus.long_ttl || '315360000000') // 1000 * 60 * 60 * 24 * 365 * 10 (10 years)
 
 var Sockets = require('./app/modules/sockets.js')
 var Scanner = require('cc-block-parser')
