@@ -25,6 +25,10 @@ properties.bus.mongodb = process.env.BUS_MONGODB || properties.bus.mongodb
 properties.bus.timer = parseInt(process.env.BUS_TIMER || properties.bus.timer || '0')
 properties.bus.short_ttl = parseInt(process.env.BUS_SHORT_TTL || properties.bus.short_ttl || '604800000') // 1000 * 60 * 60 * 24 * 7 (week)
 properties.bus.long_ttl = parseInt(process.env.BUS_LONG_TTL || properties.bus.long_ttl || '315360000000') // 1000 * 60 * 60 * 24 * 365 * 10 (10 years)
+properties.bus.debug = properties.bus.debug || process.env.BUS_DEBUG || 'false'
+properties.bus.debug = properties.bus.debug.toLowerCase() === 'true'
+properties.bus.returnBuffers = properties.bus.returnBuffers || process.env.BUS_RETURN_BUFFER || 'false'
+properties.bus.returnBuffers = properties.bus.returnBuffers.toLowerCase() === 'true'
 
 var Sockets = require('./app/modules/sockets.js')
 var Scanner = require('cc-block-parser')
