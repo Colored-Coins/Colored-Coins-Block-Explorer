@@ -8,11 +8,13 @@ var Sockets = function (opt) {
   var self = this
 
   self.io = opt.io
-  self.bus = opt.bus
-  self.channel_prefix = opt.channel_prefix
-  var index = self.channel_prefix.indexOf('.*')
-  if (~index) {
-    self.channel_prefix = self.channel_prefix.substring(0, index)
+  if (opt.bus) {
+    self.bus = opt.bus
+    self.channel_prefix = opt.channel_prefix
+    var index = self.channel_prefix.indexOf('.*')
+    if (~index) {
+      self.channel_prefix = self.channel_prefix.substring(0, index)
+    }
   }
   self.events = self.io.of('/events')
   self.scanner = opt.scanner

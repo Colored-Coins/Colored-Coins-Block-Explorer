@@ -122,6 +122,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
 }
 
 var find_address_info = function (address, confirmations, callback) {
+  var limit = 100
   var ans = {
     address: address
   }
@@ -136,20 +137,33 @@ var find_address_info = function (address, confirmations, callback) {
       AddressesTransactions.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_txids, cb) {
-      var txids = []
-      address_txids.forEach(function (address_txid) {
-        txids.push(address_txid.txid)
+      var txids = address_txids.map(function (address_txid) {
+        return address_txid.txid
       })
-      var conditions = {
-        txid: {$in: txids}
-      }
-      if (confirmations) {
-        conditions.blockheight = {
-          $lte: properties.last_block - confirmations + 1,
-          $gte: 0
+      // console.log('txids', txids)
+      var txs = []
+      async.whilst(function () { return txids.length > 0 }, function (cb) {
+        var bulk_txids = txids.splice(0, limit)
+        // console.log('bulk_txids', bulk_txids)
+        var conditions = {
+          txid: {$in: bulk_txids}
         }
-      }
-      RawTransactions.find(conditions, no_id).lean().exec(cb)
+        if (confirmations) {
+          conditions.blockheight = {
+            $lte: properties.last_block - confirmations + 1,
+            $gte: 0
+          }
+        }
+        RawTransactions.find(conditions, no_id).lean().exec(function (err, bulk_txs) {
+          if (err) return cb(err)
+          txs = txs.concat(bulk_txs)
+          // console.log('txs', txs.map(function (tx) { return tx.txid }))
+          cb()
+        })
+      }, 
+      function (err) {
+        cb(err, txs)
+      })
     },
     function (txs, cb) {
       txs.forEach(function (tx) {

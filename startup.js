@@ -110,7 +110,7 @@ async.waterfall([
       }
     }
     casimir.scanner = scanner = new Scanner(settings, mongoose)
-    if (pubsub && process.env.ROLE === properties.roles.SCANNER) {
+    if (pubsub && properties.bus.redis && properties.bus.mongodb && properties.bus.channel && process.env.ROLE === properties.roles.SCANNER) {
       casimir.bus = new pubsub.PBus(properties.bus)
       casimir.bus.on('ready', function() {
         callback()
@@ -123,9 +123,11 @@ async.waterfall([
   function (callback) {
     var opts = {
       io: casimir.server.io_server,
-      scanner: scanner,
-      bus: casimir.bus,
-      channel_prefix: properties.bus.channel
+      scanner: scanner
+    }
+    if (casimir.bus) {
+      opts.bus = casimir.bus
+      opts.channel_prefix = properties.bus.channel
     }
     casimir.sockets = new Sockets(opts)
     if (properties.scanner.scan === 'true' && properties.scanner.mempool_only !== 'true') {
