@@ -3,6 +3,7 @@ var async = require('async')
 var moment = require('moment')
 var Cache = require('ttl')
 var errors = require('cc-errors')
+var randomstring = require("randomstring");
 
 var casimir = global.casimir
 var properties = casimir.properties
@@ -122,6 +123,7 @@ var find_addresses_info = function (addresses, confirmations, callback) {
 }
 
 var find_address_info = function (address, confirmations, callback) {
+  var rand = randomstring.generate()
   var limit = 100
   var ans = {
     address: address
@@ -131,12 +133,15 @@ var find_address_info = function (address, confirmations, callback) {
   var assets = assets = {}
   ans.balance = 0
   ans.received = 0
-
+  console.time(rand + ':find_address_info')
   async.waterfall([
     function (cb) {
+      console.time(rand + ':AddressesTransactions.find')
       AddressesTransactions.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_txids, cb) {
+      console.timeEnd(rand + ':AddressesTransactions.find')
+      console.time(rand + ':get_txs')
       var txids = address_txids.map(function (address_txid) {
         return address_txid.txid
       })
@@ -166,6 +171,8 @@ var find_address_info = function (address, confirmations, callback) {
       })
     },
     function (txs, cb) {
+      console.timeEnd(rand + ':get_txs')
+      console.time(rand + ':process_txs')
       txs.forEach(function (tx) {
         if ('vout' in tx && tx.vout) {
           tx.vout.forEach(function (vout) {
@@ -197,9 +204,13 @@ var find_address_info = function (address, confirmations, callback) {
       return cb()
     },
     function (cb) {
+      console.timeEnd(rand + ':process_txs')
+      console.time(rand + ':AddressesUtxos.find')
       AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_utxos, cb) {
+      console.timeEnd(rand + ':AddressesUtxos.find')
+      console.time(rand + ':get_utxos')
       if (!address_utxos.length) return cb(null, [])
       var conditions = []
       address_utxos.forEach(function (address_utxo) {
@@ -219,6 +230,8 @@ var find_address_info = function (address, confirmations, callback) {
       Utxos.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (unspents, cb) {
+      console.timeEnd(rand + ':get_utxos')
+      console.time(rand + ':process_utxos')
       unspents.forEach(function (tx) {
         ans.balance += tx.value
         tx.assets = tx.assets || []
@@ -245,6 +258,8 @@ var find_address_info = function (address, confirmations, callback) {
   ],
   function (err, txs) {
     if (err) return callback(err)
+    console.timeEnd(rand + ':process_utxos')
+    console.timeEnd(rand + ':find_address_info')
     ans.transactions = txs
     ans.assets = []
     for (var assetId in assets) {
