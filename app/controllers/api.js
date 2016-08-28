@@ -54,7 +54,7 @@ var find_block = function (height_or_hash, callback) {
 var add_used_txid = function (tx, callback) {
   if (!tx || !tx.vout) return callback(null, tx)
   tx.ccdata = tx.ccdata || []
-  async.each(tx.vout, function (vout, cb) {
+  async.eachLimit(tx.vout, 100, function (vout, cb) {
     vout.assets = vout.assets || []
     find_utxo(tx.txid, vout.n, function (err, utxo) {
       if (err) return cb(err)
@@ -237,7 +237,7 @@ var find_address_info = function (address, confirmations, callback) {
           utxos.push(tx)
         }
       })
-      async.map(transactions, function (tx, cb) {
+      async.mapLimit(transactions, 100, function (tx, cb) {
         add_used_txid(tx, cb)
       },
       cb)
