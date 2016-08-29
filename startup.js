@@ -5,7 +5,7 @@ var pubsub
 try {
   pubsub = require('fw_pubsub')
 } catch (e) {
-  console.warning('no pubsub', e)
+  console.warn('no pubsub', e)
 }
 
 var casimir = global.casimir
