@@ -63,6 +63,7 @@ var add_used_txid = function (tx, callback) {
     utxos.forEach(function (utxo) {
       var output = tx.vout[utxo.index]
       if (!output) return
+      output.assets = output.assets || []
       output.used = utxo.used
       output.blockheight = utxo.blockheight
       output.usedBlockheight = utxo.usedBlockheight
