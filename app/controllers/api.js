@@ -23,6 +23,7 @@ var AddressesUtxos = db.get_model('AddressesUtxos')
 var AssetsTransactions = db.get_model('AssetsTransactions')
 var AssetsUtxos = db.get_model('AssetsUtxos')
 var AssetsAddresses = db.get_model('AssetsAddresses')
+var AddressesBalances = db.get_model('AddressesBalances')
 
 var MAX_BLOCKS_ALLOWED = 50
 
@@ -55,20 +56,18 @@ var find_block = function (height_or_hash, callback) {
 var add_used_txid = function (tx, callback) {
   if (!tx || !tx.vout) return callback(null, tx)
   tx.ccdata = tx.ccdata || []
-  async.eachLimit(tx.vout, 100, function (vout, cb) {
-    vout.assets = vout.assets || []
-    find_utxo(tx.txid, vout.n, function (err, utxo) {
-      if (err) return cb(err)
-      if (!utxo) return cb('cant find transaction: ' + tx.txid + ' output: ' + vout.n)
-      vout.used = utxo.used
-      vout.blockheight = utxo.blockheight
-      vout.usedBlockheight = utxo.usedBlockheight
-      vout.usedTxid = utxo.usedTxid
-      cb()
+  var outputs = tx.vout.map(function (output) { return { txid: tx.txid, index: output.n}})
+  find_utxos(outputs, function (err, utxos) {
+    if (err) return callback (err)
+    if (utxos.length !== outputs.length) return callback('cant find all transaction ' + tx.txid + ' outputs')
+    utxos.forEach(function (utxo) {
+      var output = tx.vout[utxo.index]
+      if (!output) return
+      output.used = utxo.used
+      output.blockheight = utxo.blockheight
+      output.usedBlockheight = utxo.usedBlockheight
+      output.usedTxid = utxo.usedTxid
     })
-  },
-  function (err) {
-    if (err) return callback(err)
     callback(null, tx)
   })
 }

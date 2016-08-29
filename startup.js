@@ -1,10 +1,11 @@
 var mongoose = require('mongoose')
 var async = require('async')
 var pubsub
+
 try {
   pubsub = require('fw_pubsub')
 } catch (e) {
-  console.error('no pubsub', e)
+  console.warning('no pubsub', e)
 }
 
 var casimir = global.casimir
