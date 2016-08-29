@@ -54,21 +54,41 @@ var find_block = function (height_or_hash, callback) {
 }
 
 var add_used_txid = function (tx, callback) {
+
+  // if (!tx || !tx.vout) return callback(null, tx)
+  // tx.ccdata = tx.ccdata || []
+  // var outputs = tx.vout.map(function (output) { return { txid: tx.txid, index: output.n}})
+  // find_utxos(outputs, function (err, utxos) {
+  //   if (err) return callback (err)
+  //   if (utxos.length !== outputs.length) return callback('cant find all transaction ' + tx.txid + ' outputs')
+  //   utxos.forEach(function (utxo) {
+  //     var output = tx.vout[utxo.index]
+  //     if (!output) return
+  //     output.assets = output.assets || []
+  //     output.used = utxo.used
+  //     output.blockheight = utxo.blockheight
+  //     output.usedBlockheight = utxo.usedBlockheight
+  //     output.usedTxid = utxo.usedTxid
+  //   })
+  //   callback(null, tx)
+  // })
+  
   if (!tx || !tx.vout) return callback(null, tx)
   tx.ccdata = tx.ccdata || []
-  var outputs = tx.vout.map(function (output) { return { txid: tx.txid, index: output.n}})
-  find_utxos(outputs, function (err, utxos) {
-    if (err) return callback (err)
-    if (utxos.length !== outputs.length) return callback('cant find all transaction ' + tx.txid + ' outputs')
-    utxos.forEach(function (utxo) {
-      var output = tx.vout[utxo.index]
-      if (!output) return
-      output.assets = output.assets || []
-      output.used = utxo.used
-      output.blockheight = utxo.blockheight
-      output.usedBlockheight = utxo.usedBlockheight
-      output.usedTxid = utxo.usedTxid
+  async.eachLimit(tx.vout, 100, function (vout, cb) {
+    vout.assets = vout.assets || []
+    find_utxo(tx.txid, vout.n, function (err, utxo) {
+      if (err) return cb(err)
+      if (!utxo) return cb('cant find transaction: ' + tx.txid + ' output: ' + vout.n)
+      vout.used = utxo.used
+      vout.blockheight = utxo.blockheight
+      vout.usedBlockheight = utxo.usedBlockheight
+      vout.usedTxid = utxo.usedTxid
+      cb()
     })
+  },
+  function (err) {
+    if (err) return callback(err)
     callback(null, tx)
   })
 }
