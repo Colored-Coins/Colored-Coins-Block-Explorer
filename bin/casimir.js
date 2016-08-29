@@ -5,6 +5,7 @@ var properties = casimir_core.properties(__dirname + '/../config/')
 if (properties.ENV.type === 'development') process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 properties.server.favicon = __dirname + '/../' + properties.server.favicon
+properties.server.compression = process.env.COMPRESSION || properties.server.compression
 properties.engine.view_folder = __dirname + '/../' + properties.engine.view_folder
 properties.engine.static_folder = __dirname + '/../' + properties.engine.static_folder
 
