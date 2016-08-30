@@ -116,6 +116,9 @@ async.waterfall([
       casimir.bus.on('ready', function() {
         callback()
       })
+      casimir.bus.on('error', function (err) {
+        console.error('BUS_ERROR', err)
+      })
       casimir.bus.create()
     } else {
       callback()
