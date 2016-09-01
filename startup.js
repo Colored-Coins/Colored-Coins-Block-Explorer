@@ -113,7 +113,7 @@ async.waterfall([
     casimir.scanner = scanner = new Scanner(settings, mongoose)
     if (pubsub && properties.bus.redis && properties.bus.mongodb && properties.bus.channel && process.env.ROLE === properties.roles.SCANNER) {
       casimir.bus = new pubsub.PBus(properties.bus)
-      casimir.bus.on('ready', function() {
+      casimir.bus.once('ready', function() {
         callback()
       })
       casimir.bus.on('error', function (err) {
