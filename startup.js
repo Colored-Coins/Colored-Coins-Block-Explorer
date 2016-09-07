@@ -30,6 +30,9 @@ properties.bus.debug = properties.bus.debug || process.env.BUS_DEBUG || 'false'
 properties.bus.debug = properties.bus.debug.toLowerCase() === 'true'
 properties.bus.returnBuffers = properties.bus.returnBuffers || process.env.BUS_RETURN_BUFFER || 'false'
 properties.bus.returnBuffers = properties.bus.returnBuffers.toLowerCase() === 'true'
+properties.bus.subscribe = properties.bus.subscribe || process.env.BUS_SUBSCRIBE || 'true'
+properties.bus.subscribe = properties.bus.subscribe.toLowerCase() === 'true'
+
 
 var Sockets = require('./app/modules/sockets.js')
 var Scanner = require('cc-block-parser')
