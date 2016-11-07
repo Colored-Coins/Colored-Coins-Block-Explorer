@@ -3,7 +3,8 @@ var async = require('async')
 var moment = require('moment')
 var Cache = require('ttl')
 var errors = require('cc-errors')
-var randomstring = require("randomstring");
+var randomstring = require("randomstring")
+var _ = require('lodash')
 
 var casimir = global.casimir
 var properties = casimir.properties
@@ -362,10 +363,7 @@ var find_asset_transactions = function (assetId, confirmations, type, callback) 
     callback = type
     type = null
   }
-  var ans = {
-    assetId: assetId
-  }
-  var transactions = ans.transactions = []
+  var transactions = []
 
   async.waterfall([
      function (cb) {
@@ -409,8 +407,7 @@ var find_asset_transactions = function (assetId, confirmations, type, callback) 
   ],
   function (err, transactions) {
     if (err) return callback(err)
-    ans.transactions = transactions
-    return callback(null, ans)
+    return callback(null, transactions)
   })
 }
 
@@ -565,27 +562,28 @@ var find_asset_info = function (assetId, with_transactions, callback) {
     with_transactions = false
   }
 
-  var functions = []
-  functions[0] = function (cb) {
-    find_asset_holders(assetId, 0, cb)
+  var functions = {
+    holders: function (cb) {
+      find_asset_holders(assetId, 0, cb)
+    },
+    issuances: function (cb) {
+      find_asset_transactions(assetId, 0, 'issuance', cb)
+    },
+    burns: function (cb) {
+      find_asset_transactions(assetId, 0, 'burn', cb)
+    }
   }
   if (!with_transactions) {
-    functions[1] = function (cb) {
+    functions.numOfTransfers = function (cb) {
       count_asset_transactions(assetId, 'transfer', cb)
     }
-    functions[2] = function (cb) {
-      count_asset_transactions(assetId, 'issuance', cb)
-    }
-    functions[3] = function (cb) {
+    functions.firstBlock = function (cb) {
       find_asset_first_block(assetId, cb)
     }
 
   } else {
-    functions[1] = function (cb) {
+    functions.transfers = function (cb) {
       find_asset_transactions(assetId, 0, 'transfer', cb)
-    }
-    functions[2] = function (cb) {
-      find_asset_transactions(assetId, 0, 'issuance', cb)
     }
   }
 
@@ -593,23 +591,20 @@ var find_asset_info = function (assetId, with_transactions, callback) {
   function (err, results) {
     if (err) return callback(err)
 
-    var holders = results[0]
-    var asset_info = holders
-    asset_info.totalSupply = 0
-    asset_info.numOfHolders = 0
-    holders.holders.forEach(function (asset) {
-      asset_info.totalSupply += asset.amount
-      asset_info.numOfHolders++
-    })
+    var asset_info = results.holders
+    asset_info.numOfHolders = asset_info.holders.length
+    var totalIssued = _.sumBy(results.issuances, find_issuance_amount)
+    var totalBurned = _.sumBy(results.burns, function (burn) { return find_burn_amounts(burn)[assetId] || 0 }) || 0
+    asset_info.totalSupply = totalIssued - totalBurned
 
     if (!with_transactions) {
-      asset_info.numOfTransfers = results[1]
-      asset_info.numOfIssuance = results[2]
-      asset_info.firstBlock = results[3]
+      asset_info.numOfTransfers = results.numOfTransfers
+      asset_info.numOfIssuance = results.issuances.length
+      asset_info.firstBlock = results.firstBlock
 
     } else {
-      asset_info.transfers = results[1].transactions
-      asset_info.issuances = results[2].transactions
+      asset_info.transfers = results.transfers
+      asset_info.issuances = results.issuances
       asset_info.numOfTransfers = asset_info.transfers.length
       asset_info.numOfIssuances = asset_info.issuances.length
       asset_info.issuances.forEach(function (transaction) {
@@ -621,6 +616,31 @@ var find_asset_info = function (assetId, with_transactions, callback) {
 
     return callback(null, asset_info)
   })
+}
+
+var find_issuance_amount = function (issuanceTx) {
+  return _.sumBy(issuanceTx.ccdata, function (cc) {
+    return cc.amount || 0
+  })
+}
+
+// returns an array of objects, where each object consists of assetId and its respective burn amount
+var find_burn_amounts = function (burnTx) {
+  // difference between inputs assets and outputs assets
+  var assets = {}
+  burnTx.vin.forEach(function (input) {
+    input.assets.forEach(function (asset) {
+      assets[asset.assetId] = assets[asset.assetId] || 0
+      assets[asset.assetId] += asset.amount
+    })
+  })
+  burnTx.vout.forEach(function (output) {
+    output.assets.forEach(function (asset) {
+      assets[asset.assetId] -= asset.amount
+      if (!assets[asset.assetId]) delete assets[asset.assetId]
+    })
+  })
+  return assets
 }
 
 var find_block_with_transactions = function (height_or_hash, colored, callback) {
