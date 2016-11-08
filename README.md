@@ -9,7 +9,7 @@
 
 1. Bitcoind that runs as an RPC server with txindex=1
 2. Mongodb
-3. At least a 1TB hard-drive (The current size of the data is around 600GB)
+3. At least a 1.5TB hard-drive (The current size of the data is around 1TB, as of November 2016)
 
 
 ### Installation
