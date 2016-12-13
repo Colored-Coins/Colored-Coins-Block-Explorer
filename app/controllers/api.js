@@ -33,6 +33,8 @@ var no_id = {
 }
 
 properties.last_block = properties.last_block || 0
+var debug = properties.debug
+
 var find_block = function (height_or_hash, callback) {
   var conditions
   if (typeof height_or_hash === 'string' && height_or_hash.length > 10) {
@@ -154,15 +156,17 @@ var find_address_info = function (address, confirmations, callback) {
   var assets = assets = {}
   ans.balance = 0
   ans.received = 0
-  console.time(rand + ':find_address_info')
+  if (debug) console.time(rand + ':find_address_info')
   async.waterfall([
     function (cb) {
-      console.time(rand + ':AddressesTransactions.find')
+      if (debug) console.time(rand + ':AddressesTransactions.find')
       AddressesTransactions.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_txids, cb) {
-      console.timeEnd(rand + ':AddressesTransactions.find')
-      console.time(rand + ':get_txs')
+      if (debug) {
+        console.timeEnd(rand + ':AddressesTransactions.find')
+        console.time(rand + ':get_txs')
+      }
       var txids = address_txids.map(function (address_txid) {
         return address_txid.txid
       })
@@ -192,8 +196,10 @@ var find_address_info = function (address, confirmations, callback) {
       })
     },
     function (txs, cb) {
-      console.timeEnd(rand + ':get_txs')
-      console.time(rand + ':process_txs')
+      if (debug) {
+        console.timeEnd(rand + ':get_txs')
+        console.time(rand + ':process_txs')
+      }
       txs.forEach(function (tx) {
         if ('vout' in tx && tx.vout) {
           tx.vout.forEach(function (vout) {
@@ -225,13 +231,17 @@ var find_address_info = function (address, confirmations, callback) {
       return cb()
     },
     function (cb) {
-      console.timeEnd(rand + ':process_txs')
-      console.time(rand + ':AddressesUtxos.find')
+      if (debug) {
+        console.timeEnd(rand + ':process_txs')
+        console.time(rand + ':AddressesUtxos.find')
+      }
       AddressesUtxos.find({address: address}, no_id).lean().exec(cb)
     },
     function (address_utxos, cb) {
-      console.timeEnd(rand + ':AddressesUtxos.find')
-      console.time(rand + ':get_utxos')
+      if (debug) {
+        console.timeEnd(rand + ':AddressesUtxos.find')
+        console.time(rand + ':get_utxos')
+      }
       if (!address_utxos.length) return cb(null, [])
       var conditions = []
       address_utxos.forEach(function (address_utxo) {
@@ -251,8 +261,10 @@ var find_address_info = function (address, confirmations, callback) {
       Utxos.find({$or: conditions}, no_id).lean().exec(cb)
     },
     function (unspents, cb) {
-      console.timeEnd(rand + ':get_utxos')
-      console.time(rand + ':process_utxos')
+      if (debug) {
+        console.timeEnd(rand + ':get_utxos')
+        console.time(rand + ':process_utxos')
+      }
       unspents.forEach(function (tx) {
         ans.balance += tx.value
         tx.assets = tx.assets || []
@@ -279,8 +291,10 @@ var find_address_info = function (address, confirmations, callback) {
   ],
   function (err, txs) {
     if (err) return callback(err)
-    console.timeEnd(rand + ':process_utxos')
-    console.timeEnd(rand + ':find_address_info')
+    if (debug) {
+      console.timeEnd(rand + ':process_utxos')
+      console.timeEnd(rand + ':find_address_info')
+    }
     ans.transactions = txs
     ans.assets = []
     for (var assetId in assets) {
@@ -1022,10 +1036,10 @@ var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
   var callback
-  console.time('parse_tx: full_parse ' + txid)
+  if (debug) console.time('parse_tx: full_parse ' + txid)
   callback = function (data) {
     if (data.priority_parsed === txid) {
-      console.timeEnd('parse_tx: full_parse ' + txid)
+      if (debug) console.timeEnd('parse_tx: full_parse ' + txid)
       process.removeListener('message', callback)
       if (data.err) return next(data.err)
       res.send({txid: txid})
@@ -1034,9 +1048,8 @@ var parse_tx = function (req, res, next) {
 
   process.on('message', callback)
 
-  console.time('priority_parse: api_to_parent ' + txid)
+  logger.debug('priority_parse: api_to_parent ' + txid)
   process.send({to: properties.roles.SCANNER, parse_priority: txid})
-  console.timeEnd('priority_parse: api_to_parent ' + txid)
 }
 
 var get_popular_assets = function (req, res, next) {

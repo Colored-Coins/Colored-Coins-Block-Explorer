@@ -98,8 +98,8 @@ async.waterfall([
   },
   function (app, callback) {
     var settings = {
-      debug: false,
       properties: properties,
+      debug: properties.debug,
       next_hash: properties.next_hash,
       last_hash: properties.last_hash,
       last_block: properties.last_block,
