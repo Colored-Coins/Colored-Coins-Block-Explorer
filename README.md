@@ -96,9 +96,10 @@ mempool_only=false
 #admin_users=
 #realm=
 
-#Allows logger to send logs to logentries
-[logentries]
-#api_key=
+#Logger properties
+[log]
+#logentries_api_key=
+#level=
 ```
 
 ### Developmenet

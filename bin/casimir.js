@@ -10,8 +10,8 @@ properties.engine.view_folder = __dirname + '/../' + properties.engine.view_fold
 properties.engine.static_folder = __dirname + '/../' + properties.engine.static_folder
 
 var log_settings = {
-  env: properties.ENV.type,
-  logentries_api_ley: properties.logentries.api_key,
+  level: properties.log.level,
+  logentries_api_key: properties.log.logentries_api_key,
   log_dir: __dirname + '/../app/log'
 }
 
