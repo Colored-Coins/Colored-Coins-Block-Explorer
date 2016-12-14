@@ -8,10 +8,11 @@ properties.server.favicon = __dirname + '/../' + properties.server.favicon
 properties.server.compression = process.env.COMPRESSION || properties.server.compression
 properties.engine.view_folder = __dirname + '/../' + properties.engine.view_folder
 properties.engine.static_folder = __dirname + '/../' + properties.engine.static_folder
+properties.debug = process.env.DEBUG === 'true' || properties.debug === 'true'
 
 var log_settings = {
-  env: properties.ENV.type,
-  logentries_api_ley: properties.logentries.api_key,
+  level: properties.log && properties.log.level,
+  logentries_api_key: properties.log && properties.log.logentries_api_key,
   log_dir: __dirname + '/../app/log'
 }
 
