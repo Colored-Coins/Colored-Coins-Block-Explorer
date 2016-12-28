@@ -703,9 +703,8 @@ var find_main_stats = function (callback) {
   var main_stats = {}
   async.parallel([
     function (cb) {
-      AssetsTransactions.distinct('txid').exec(function (err, cc_transactions) {
-        if (err) return cb(err)
-        main_stats.numOfCCTransactions = cc_transactions.length
+      RawTransactions.count({colored: true}, (err, numOfCCTransactions) => {
+        main_stats.numOfCCTransactions = numOfCCTransactions
         cb()
       })
     },
