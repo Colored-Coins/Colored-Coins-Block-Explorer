@@ -5,6 +5,7 @@ var Cache = require('ttl')
 var errors = require('cc-errors')
 var randomstring = require("randomstring")
 var _ = require('lodash')
+var binarySearch = require('binary-search')
 
 var casimir = global.casimir
 var properties = casimir.properties
@@ -780,14 +781,18 @@ var find_transactions_by_intervals = function (assetId, start, end, interval, ca
   function (err, groups) {
     if (err) return callback(err)
     var intervals = []
-    for (var i = 0; i < numOfIntervals; i++) {
-      var group = _.find(groups, group => group._id === i)
+    _.times(numOfIntervals, (i) => {
+      var group
+      var group_index = binarySearch(groups, i, (a, b) => {return a._id - b})
+      if (group_index >= 0) {
+        group = groups[group_index]
+      }
       intervals.push({
         from: start + i * interval,
         untill: start + (i + 1) * interval,
         txsSum: (group && group.txsSum) || 0 
       })
-    }
+    })
     callback(null, intervals)
   })
 }
