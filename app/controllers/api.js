@@ -5,6 +5,7 @@ var Cache = require('ttl')
 var errors = require('cc-errors')
 var randomstring = require("randomstring")
 var _ = require('lodash')
+var binarySearch = require('binary-search')
 
 var casimir = global.casimir
 var properties = casimir.properties
@@ -702,9 +703,8 @@ var find_main_stats = function (callback) {
   var main_stats = {}
   async.parallel([
     function (cb) {
-      AssetsTransactions.distinct('txid').exec(function (err, cc_transactions) {
-        if (err) return cb(err)
-        main_stats.numOfCCTransactions = cc_transactions.length
+      RawTransactions.count({colored: true}, (err, numOfCCTransactions) => {
+        main_stats.numOfCCTransactions = numOfCCTransactions
         cb()
       })
     },
@@ -736,49 +736,63 @@ var find_transactions_by_intervals = function (assetId, start, end, interval, ca
   start = Math.round(start)
   end = Math.round(end)
   interval = Math.round(interval)
+  var numOfIntervals = Math.round((end - start) / interval)  
+  if (numOfIntervals > 1000) return callback(new errors.ResolutionTooHighError())
 
-  if (Math.round((end - start) / interval) > 1000) return callback(new errors.ResolutionTooHighError())
-
-  var conditions = {
-
-  }
-  if (assetId) {
-    conditions.assetId = assetId
-  }
-
-  AssetsTransactions.distinct('txid', conditions).exec(function (err, txids) {
-    var intervals = []
-    if (err) return callback(err)
-    var from = start
-    async.whilst(
-      function () { return from < end },
-      function (cb) {
-        var untill = Math.min(from + interval, end)
-        from = Math.round(from)
-        untill = Math.round(untill)
-        var cond = {
-          txid: {$in: txids},
-          blocktime: {
-            $gte: from, // from
-            $lt: untill
-          }
+  async.waterfall([
+    function (cb) {
+      if (!assetId) return cb(null, null)
+      AssetsTransactions.distinct('txid', {assetId: assetId}).exec(cb)
+    },
+    function (txids, cb) {
+      var conditions = {
+        colored: true,
+        blocktime: {
+          $gte: start,
+          $lt: end
         }
-        RawTransactions.count(cond).exec(function (err, txs_num) {
-          if (err) return cb(err)
-          // logger.debug('count: ' + txs_num)
-          intervals.push({
-            from: from,
-            untill: untill,
-            txsSum: txs_num
-          })
-          from = untill
-          cb()
-        })
-      },
-      function (err) {
-        callback(err, intervals)
       }
-    )
+      if (txids) {
+        conditions.txid = {$in: txids}
+      }
+      RawTransactions.aggregate()
+        .match(conditions)
+        .project({
+          indexInInterval: {
+            $floor: {
+              $divide: [
+                {
+                  $subtract: ['$blocktime', start]
+                },
+                interval
+              ]
+            }
+          }
+        })
+        .group({
+          _id: '$indexInInterval',
+          txsSum: {$sum: 1}
+        })
+        .sort({_id: 1})
+        .exec(cb)
+    }
+  ],
+  function (err, groups) {
+    if (err) return callback(err)
+    var intervals = []
+    _.times(numOfIntervals, (i) => {
+      var group
+      var group_index = binarySearch(groups, i, (a, b) => {return a._id - b})
+      if (group_index >= 0) {
+        group = groups[group_index]
+      }
+      intervals.push({
+        from: start + i * interval,
+        untill: start + (i + 1) * interval,
+        txsSum: (group && group.txsSum) || 0 
+      })
+    })
+    callback(null, intervals)
   })
 }
 
