@@ -1369,24 +1369,18 @@ var is_active = function (req, res, next) {
   var group = {
     _id: "$address"
   }
-  var project = {
-    address: "$_id",
-    _id: 0
+  var sort = {
+    _id: 1
   }
 
-  AddressesTransactions.aggregate( 
-    {$match   : match}, 
+  AddressesTransactions.aggregate(
+    {$match   : match},
     {$group   : group},
-    {$project : project}
+    {$sort: sort}
   ).exec(function (err, active_addresses) {
     if (err) return next(err)
     var ans = addresses.map(function (address) {
-      var found = false
-      active_addresses.forEach(function (active_address) {
-        if (!found && active_address.address === address) {
-          found = true
-        }
-      })
+      var found = binarySearch(active_addresses, address, (a, b) => { return a._id.localeCompare(b) }) >= 0
       return {
         address: address,
         active: found
