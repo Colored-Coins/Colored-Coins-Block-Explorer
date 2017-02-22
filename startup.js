@@ -1,5 +1,7 @@
 var mongoose = require('mongoose')
 var async = require('async')
+var path = require('path')
+var fs = require('fs')
 var pubsub
 
 try {
@@ -81,6 +83,19 @@ process.on('message', function (msg) {
   }
 })
 
+function getApiVersions () {
+  var versionFolders = []
+  var routesPath = path.join(__dirname, '/routes')
+  var files = fs.readdirSync(routesPath)
+  files.forEach(function (file_name) {
+    var file_path = path.join(routesPath, file_name)
+    if (fs.lstatSync(file_path).isDirectory() && file_name[0] === 'v' && !isNaN(file_name.substring(1, file_name.length))) {
+        versionFolders.push(file_name)
+    }
+  })
+  return versionFolders
+}
+
 async.waterfall([
   function (callback) {
     db.init(properties.db, mongoose, callback)
@@ -130,6 +145,7 @@ async.waterfall([
   function (callback) {
     var opts = {
       io: casimir.server.io_server,
+      api_versions: getApiVersions(),
       scanner: scanner
     }
     if (casimir.bus) {
