@@ -16,7 +16,10 @@ var Sockets = function (opt) {
       self.channel_prefix = self.channel_prefix.substring(0, index)
     }
   }
-  self.events = self.io.of('/events')
+
+  var apiVersions = opt.api_versions
+  self.events = [self.io.of('/events')]
+  self.events = self.events.concat(apiVersions.map(version => self.io.of('/' + version + '/events')))
   self.scanner = opt.scanner
   self.on_address_sockets = {}
   self.on_trasaction_socket = {}
@@ -40,7 +43,7 @@ Sockets.prototype.open_channels = function () {
           }
         }
         if (process.env.ROLE === properties.roles.API) {
-          self.events.to(channel).local.emit(channel, msg) // if the scanner is paralelize then the local flag should be false
+          self.events.forEach(event => event.to(channel).local.emit(channel, msg)) // if the scanner is paralelize then the local flag should be false
         } else {
           if (self.bus) {
             if (channel === 'newcctransaction') {
@@ -59,7 +62,7 @@ Sockets.prototype.open_channels = function () {
       transaction: transaction
     }
     if (process.env.ROLE === properties.roles.API) {
-      self.events.to('transaction/' + transaction.txid).local.emit('transaction', msg)
+      self.events.forEach(event => event.to('transaction/' + transaction.txid).local.emit('transaction', msg))
     } else if (self.bus) {
       self.bus.push({message: msg}, self.channel_prefix + '.transaction.' + transaction.txid, properties.bus.short_ttl)
     }
@@ -113,7 +116,7 @@ Sockets.prototype.open_channels = function () {
         transaction: transaction
       }
       if (process.env.ROLE === properties.roles.API) {
-        self.events.to('address/' + address).local.emit('transaction', msg)
+        self.events.forEach(event => event.to('address/' + address).local.emit('transaction', msg))
       } else if (self.bus) {
         self.bus.push({message: msg}, self.channel_prefix + '.address.' + address, properties.bus.short_ttl)
       }
@@ -126,7 +129,7 @@ Sockets.prototype.open_channels = function () {
         transaction: transaction
       }
       if (process.env.ROLE === properties.roles.API) {
-        self.events.to('asset/' + assetId).local.emit('transaction', msg)
+        self.events.forEach(event => event.to('asset/' + assetId).local.emit('transaction', msg))
       } else if (self.bus) {
         self.bus.push({message: msg}, self.channel_prefix + '.asset.' + assetId, properties.bus.short_ttl)
       }
@@ -136,7 +139,7 @@ Sockets.prototype.open_channels = function () {
 
 Sockets.prototype.open_socket = function () {
   var self = this
-  self.events.on('connection', function (socket) {
+  self.events.forEach(event => event.on('connection', function (socket) {
     logger.info('socketid', socket.id, 'connected.')
     socket.on('join', function (rooms) {
       if (!Array.isArray(rooms)) {
@@ -161,7 +164,7 @@ Sockets.prototype.open_socket = function () {
     socket.on('disconnect', function () {
       logger.info('socketid', socket.id, 'disconnected.')
     })
-  })
+  }))
 }
 
 module.exports = Sockets
