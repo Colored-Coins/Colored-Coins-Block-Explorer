@@ -111,7 +111,7 @@ mempool_only=false
 
 ## License
 
-MIT © [ColoredCoins](http://coloredcoins.org)
+[Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0)
 
 [js-standard-url]: https://github.com/feross/standard
 [js-standard-image]: https://cdn.rawgit.com/feross/standard/master/badge.svg
