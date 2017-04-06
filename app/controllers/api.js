@@ -677,7 +677,6 @@ var find_block_with_transactions = function (height_or_hash, colored, callback) 
 }
 
 var find_first_issuance = function (assetId, utxo, callback) {
-  logger.debug(JSON.stringify(utxo.split(':')))
   var conditions = {
     txid: utxo.split(':')[0],
     index: utxo.split(':')[1]
@@ -1049,14 +1048,21 @@ var get_utxos = function (req, res, next) {
 var parse_tx = function (req, res, next) {
   var params = req.data
   var txid = params.txid || ''
+  _parse_tx(txid, function (err, result) {
+    if (err) return next(err)
+    res.send(result)
+  })
+}
+
+var _parse_tx = function (txid, callback) {
   var callback
   if (debug) console.time('parse_tx: full_parse ' + txid)
   callback = function (data) {
     if (data.priority_parsed === txid) {
       if (debug) console.timeEnd('parse_tx: full_parse ' + txid)
       process.removeListener('message', callback)
-      if (data.err) return next(data.err)
-      res.send({txid: txid})
+      if (data.err) return callback(data.err)
+      callback(null, {txid: txid})
     }
   }
 
@@ -1174,8 +1180,6 @@ var get_asset_info = function (req, res, next) {
   var utxo = params.utxo
   var verbosity = parseInt(params.verbosity)
   verbosity = ([0,1].indexOf(verbosity) > -1)? verbosity : 1
-
-  logger.debug(utxo)
 
   async.parallel([
     function (cb) {
@@ -1393,10 +1397,14 @@ var is_active = function (req, res, next) {
 var transmit = function (req, res, next) {
   var params = req.data
   var txHex = params.txHex
-
-  scanner.transmit(txHex, function (err, ans) {
+  // API process
+  scanner._transmit(txHex, function (err, txid) {
     if (err) return next(err)
-    res.send(ans)
+    // SCANNER process
+    _parse_tx(txid, function (err, result) {  
+      if (err) return next(err)
+      res.send(result)
+    })
   })
 }
 

@@ -28,13 +28,7 @@ var listen = function (worker) {
   worker.on('message', function (data) {
     switch (data.to) {
       case properties.roles.SCANNER:
-        if (data && data.parse_priority) {
-          console.time('priority_parse parent_to_scanner ' + data.parse_priority)
-        }
         scanner_worker.send(data)
-        if (data && data.parse_priority) {
-          console.timeEnd('priority_parse parent_to_scanner ' + data.parse_priority)
-        }
         break
       case properties.roles.FIXER:
         fixer_worker.send(data)
@@ -44,13 +38,7 @@ var listen = function (worker) {
         break
       default:
         api_workers_ids.forEach(function (worker_id) {
-          if (data && data.priority_parsed) {
-            console.time('priority_parse parent_to_api '+ data.priority_parsed)
-          }
           workers[worker_id].send(data)
-          if (data && data.priority_parsed) {
-            console.timeEnd('priority_parse parent_to_api '+ data.priority_parsed)
-          }
         })
         break
     }
