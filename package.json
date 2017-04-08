@@ -10,7 +10,7 @@
     "bitcoinjs-lib": "^1.5.6",
     "bs58": "^3.0.0",
     "casimircore": "^0.10.0",
-    "cc-block-parser": "git+https://github.com/Colored-Coins/Parser.git#fix-priority_parse2",
+    "cc-block-parser": "git+https://github.com/Colored-Coins/Parser.git#fix_priority_parse2",
     "cc-errors": "~0.0.6",
     "cc-request-id": "0.0.2",
     "coinstring": "^2.3.0",
